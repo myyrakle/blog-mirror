@@ -1,3 +1,4 @@
+pub mod category;
 pub mod detail;
 pub mod list;
 

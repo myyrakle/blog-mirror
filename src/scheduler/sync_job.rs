@@ -47,6 +47,27 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>
     let post_repo = PostRepo::new(ctx.pool.clone());
     let cursor_repo = CursorRepo::new(ctx.pool.clone());
 
+    // Fetch and upsert all categories with real names first
+    match crawler.fetch_categories().await {
+        Ok(cats) => {
+            let upsert_cats: Vec<UpsertCategory> = cats
+                .into_iter()
+                .map(|c| UpsertCategory {
+                    blog_id: ctx.config.naver_blog_id.clone(),
+                    category_no: c.category_no,
+                    parent_no: c.parent_no,
+                    name: c.name,
+                    post_count: c.post_count,
+                })
+                .collect();
+            category_repo.upsert_many(&upsert_cats).await?;
+            info!(count = upsert_cats.len(), "Upserted categories with real names");
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to fetch categories, will use fallback names from post list");
+        }
+    }
+
     let count_per_page = 30u32;
     let mut page = 1u32;
     let mut total = 0usize;
@@ -66,7 +87,7 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>
         let done = new_items.len() < fetched; // hit the cursor boundary
 
         if !new_items.is_empty() {
-            // Upsert categories from this page
+            // Insert new categories as fallback (preserves real names if already set)
             let mut seen: HashSet<i32> = HashSet::new();
             let cats: Vec<UpsertCategory> = new_items
                 .iter()
@@ -80,7 +101,7 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>
                     post_count: 0,
                 })
                 .collect();
-            category_repo.upsert_many(&cats).await?;
+            category_repo.insert_many_if_not_exists(&cats).await?;
 
             // Upsert posts from this page
             let upsert_posts: Vec<UpsertPost> = new_items

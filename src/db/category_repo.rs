@@ -26,6 +26,8 @@ impl CategoryRepo {
         Self { pool }
     }
 
+    /// Full upsert: inserts or updates name, parent_no, post_count.
+    /// Use this when fetching from the category API (real names).
     pub async fn upsert(&self, record: &UpsertCategory) -> Result<()> {
         sqlx::query(
             r#"
@@ -52,6 +54,32 @@ impl CategoryRepo {
     pub async fn upsert_many(&self, records: &[UpsertCategory]) -> Result<()> {
         for record in records {
             self.upsert(record).await?;
+        }
+        Ok(())
+    }
+
+    /// Insert only if not exists: preserves existing name when called from post list fallback.
+    pub async fn insert_if_not_exists(&self, record: &UpsertCategory) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO categories (blog_id, category_no, parent_no, name, post_count, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (blog_id, category_no) DO NOTHING
+            "#,
+        )
+        .bind(&record.blog_id)
+        .bind(record.category_no)
+        .bind(record.parent_no)
+        .bind(&record.name)
+        .bind(record.post_count)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn insert_many_if_not_exists(&self, records: &[UpsertCategory]) -> Result<()> {
+        for record in records {
+            self.insert_if_not_exists(record).await?;
         }
         Ok(())
     }
