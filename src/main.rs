@@ -26,8 +26,10 @@ struct Cli {
 enum Commands {
     /// Run initial full sync of Naver blog to database
     Init,
-    /// Start periodic sync and replication daemon
-    Serve,
+    /// Start sync daemon: crawls Naver blog and stores posts in DB (hourly)
+    Sync,
+    /// Start replication daemon: copies DB posts to GitHub blog (every 30 min)
+    Replicate,
 }
 
 #[tokio::main]
@@ -53,7 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Init => commands::init::run(ctx).await?,
-        Commands::Serve => commands::serve::run(ctx).await?,
+        Commands::Sync => commands::sync::run(ctx).await?,
+        Commands::Replicate => commands::replicate::run(ctx).await?,
     }
 
     Ok(())
