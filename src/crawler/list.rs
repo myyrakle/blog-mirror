@@ -79,43 +79,52 @@ where
 }
 
 impl PostListItem {
-    /// Parse the add_date string (e.g. "2024. 01. 15. 10:30") into DateTime<Utc>.
+    /// Parse the add_date string into DateTime<Utc>.
+    /// Handles both absolute formats ("2024. 01. 15. 10:30") and
+    /// relative formats ("방금", "N분 전", "N시간 전", "어제", "N일 전").
     pub fn parsed_add_date(&self) -> Option<DateTime<Utc>> {
-        let s = self.add_date.as_deref()?;
-        // Naver format: "2024. 01. 15. 10:30" or "2024.01.15. 10:30"
-        // Normalize: remove spaces around periods, strip trailing period
-        let normalized = s
-            .replace(". ", "-")
-            .replace(".", "")
-            .trim()
-            .to_string();
-        // Attempt parsing as "YYYY-MM-DD-HH:MM"
-        let normalized = normalized.replacen('-', "", 0); // keep dashes
+        let s = self.add_date.as_deref()?.trim();
+        let now = chrono::Utc::now();
 
-        // Try common Naver date formats
-        let formats = [
-            "%Y- %m- %d- %H:%M",
-            "%Y-%m-%d-%H:%M",
-            "%Y. %m. %d. %H:%M",
-        ];
-        for fmt in &formats {
-            if let Ok(naive) =
-                chrono::NaiveDateTime::parse_from_str(&normalized, fmt)
-            {
+        // --- Relative formats ---
+        if s == "방금" {
+            return Some(now);
+        }
+        if s == "어제" {
+            return Some(now - chrono::Duration::days(1));
+        }
+        if let Some(n) = parse_relative(s, "분 전") {
+            return Some(now - chrono::Duration::minutes(n));
+        }
+        if let Some(n) = parse_relative(s, "시간 전") {
+            return Some(now - chrono::Duration::hours(n));
+        }
+        if let Some(n) = parse_relative(s, "일 전") {
+            return Some(now - chrono::Duration::days(n));
+        }
+
+        // --- Absolute format: "2024. 01. 15. 10:30" ---
+        // Normalize by replacing ". " with "-" and removing remaining "."
+        let normalized = s.replace(". ", "-").replace('.', "").trim().to_string();
+        for fmt in &["%Y-%m-%d-%H:%M", "%Y- %m- %d- %H:%M"] {
+            if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&normalized, fmt) {
                 return Some(naive.and_utc());
             }
         }
-        // fallback: try parsing just the date portion
-        if let Ok(date) = chrono::NaiveDate::parse_from_str(s.trim(), "%Y. %m. %d.") {
-            return Some(
-                date.and_hms_opt(0, 0, 0)
-                    .map(|dt| dt.and_utc())
-                    .unwrap_or_default(),
-            );
+
+        // --- Absolute date only: "2024. 01. 15." ---
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y. %m. %d.") {
+            return Some(date.and_hms_opt(0, 0, 0)?.and_utc());
         }
+
         warn!(raw = s, "Could not parse Naver add_date");
         None
     }
+}
+
+/// Parses "N<suffix>" (e.g. "16시간 전") and returns N as i64.
+fn parse_relative(s: &str, suffix: &str) -> Option<i64> {
+    s.strip_suffix(suffix)?.trim().parse::<i64>().ok()
 }
 
 #[derive(Debug, Deserialize)]
