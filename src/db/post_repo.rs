@@ -12,6 +12,7 @@ pub struct PostRecord {
     pub title: String,
     pub category_no: Option<i32>,
     pub add_date: Option<DateTime<Utc>>,
+    pub body: Option<String>,
     pub fetched_at: Option<DateTime<Utc>>,
     pub replicated_at: Option<DateTime<Utc>>,
     pub replication_error: Option<String>,
@@ -67,6 +68,19 @@ impl PostRepo {
         Ok(())
     }
 
+    /// Saves the fetched HTML body for a post.
+    pub async fn save_body(&self, blog_id: &str, log_no: i64, body: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE posts SET body = $3, fetched_at = NOW(), updated_at = NOW() WHERE blog_id = $1 AND log_no = $2",
+        )
+        .bind(blog_id)
+        .bind(log_no)
+        .bind(body)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_unreplicated_in_categories(
         &self,
         blog_id: &str,
@@ -78,7 +92,7 @@ impl PostRepo {
         let rows = sqlx::query_as::<_, PostRecord>(
             r#"
             SELECT id, blog_id, log_no, title, category_no, add_date,
-                   fetched_at, replicated_at, replication_error, created_at, updated_at
+                   body, fetched_at, replicated_at, replication_error, created_at, updated_at
             FROM posts
             WHERE blog_id = $1
               AND category_no = ANY($2)

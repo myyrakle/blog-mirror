@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     context::AppContext,
@@ -114,8 +114,28 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>
                 inserted = new_items.len(),
                 total,
                 checkpoint = page_min - 1,
-                "Upserted page"
+                "Upserted page metadata"
             );
+
+            // Fetch and store HTML body for each post on this page
+            for item in &new_items {
+                crawler.rate_limit().await;
+                match crawler.fetch_post_html(item.log_no).await {
+                    Ok(html) => {
+                        if let Err(e) = post_repo
+                            .save_body(&ctx.config.naver_blog_id, item.log_no, &html)
+                            .await
+                        {
+                            warn!(log_no = item.log_no, error = %e, "Failed to save body");
+                        } else {
+                            info!(log_no = item.log_no, "Saved post body");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(log_no = item.log_no, error = %e, "Failed to fetch post body");
+                    }
+                }
+            }
         }
 
         if done || fetched < count_per_page as usize {

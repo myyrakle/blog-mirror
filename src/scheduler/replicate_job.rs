@@ -62,18 +62,23 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     for post in &posts {
         info!(log_no = post.log_no, title = %post.title, "Replicating post");
 
-        let html = match crawler.fetch_post_html(post.log_no).await {
-            Ok(h) => h,
-            Err(e) => {
-                warn!(log_no = post.log_no, error = %e, "Failed to fetch post HTML");
-                post_repo
-                    .mark_replication_error(
-                        &ctx.config.naver_blog_id,
-                        post.log_no,
-                        &e.to_string(),
-                    )
-                    .await?;
-                continue;
+        // Use stored body if available, otherwise fetch from Naver
+        let html = if let Some(body) = post.body.clone() {
+            body
+        } else {
+            match crawler.fetch_post_html(post.log_no).await {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(log_no = post.log_no, error = %e, "Failed to fetch post HTML");
+                    post_repo
+                        .mark_replication_error(
+                            &ctx.config.naver_blog_id,
+                            post.log_no,
+                            &e.to_string(),
+                        )
+                        .await?;
+                    continue;
+                }
             }
         };
 
