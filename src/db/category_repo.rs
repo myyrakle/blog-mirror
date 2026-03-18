@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use crate::error::Result;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct CategoryRecord {
     pub id: i32,
     pub blog_id: String,
@@ -55,6 +56,7 @@ impl CategoryRepo {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn find_by_blog_id(&self, blog_id: &str) -> Result<Vec<CategoryRecord>> {
         let rows = sqlx::query_as::<_, CategoryRecord>(
             "SELECT id, blog_id, category_no, parent_no, name, post_count, should_mirror, created_at, updated_at

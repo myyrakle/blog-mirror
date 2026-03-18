@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use crate::error::Result;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct PostRecord {
     pub id: i32,
     pub blog_id: String,
@@ -92,6 +93,7 @@ impl PostRepo {
         Ok(rows)
     }
 
+    #[allow(dead_code)]
     pub async fn mark_fetched(&self, blog_id: &str, log_no: i64) -> Result<()> {
         sqlx::query(
             "UPDATE posts SET fetched_at = NOW(), updated_at = NOW() WHERE blog_id = $1 AND log_no = $2",
