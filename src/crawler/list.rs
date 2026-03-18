@@ -13,6 +13,7 @@ pub struct PostListItem {
     /// Naver returns logNo as a string (e.g. "224219853968")
     #[serde(deserialize_with = "deserialize_string_or_i64")]
     pub log_no: i64,
+    #[serde(deserialize_with = "deserialize_url_decoded_string")]
     pub title: String,
     #[serde(deserialize_with = "deserialize_optional_string_or_i32", default)]
     pub category_no: Option<i32>,
@@ -155,6 +156,44 @@ impl NaverCrawler {
     }
 
 
+}
+
+fn deserialize_url_decoded_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(url_decode(&s))
+}
+
+/// Decodes a URL-form-encoded string (e.g. `%EC%9D%84` → `을`, `+` → ` `).
+fn url_decode(s: &str) -> String {
+    let s = s.replace('+', " ");
+    let bytes = s.as_bytes();
+    let mut result: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            result.push((h << 4) | l);
+            i += 3;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Naver's API occasionally returns invalid JSON escape sequences (e.g. `\s`, `\p`).
