@@ -25,10 +25,6 @@ pub struct AppConfig {
     /// PostgreSQL connection URL
     pub database_url: String,
 
-    /// Comma-separated category_no list to replicate (e.g. "42,57,103")
-    #[serde(default)]
-    pub mirror_categories: Vec<i32>,
-
     /// Delay between Naver requests in milliseconds (default 1000)
     #[serde(default = "default_crawl_delay_ms")]
     pub crawl_delay_ms: u64,
@@ -44,13 +40,7 @@ impl AppConfig {
             // Optional file-based config
             .add_source(File::with_name("blog-mirror").required(false))
             // Environment variables (e.g. NAVER_BLOG_ID, DATABASE_URL)
-            .add_source(
-                Environment::default()
-                    .separator("__")
-                    .list_separator(",")
-                    .with_list_parse_key("mirror_categories")
-                    .try_parsing(true),
-            )
+            .add_source(Environment::default().separator("__").try_parsing(true))
             .build()?;
 
         Ok(cfg.try_deserialize()?)

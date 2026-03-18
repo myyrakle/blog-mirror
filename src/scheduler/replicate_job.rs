@@ -13,9 +13,10 @@ use crate::{
 
 /// Replication job:
 /// 1. Pull latest changes
-/// 2. Find unreplicated posts in configured mirror categories
-/// 3. For each post: fetch HTML → convert → write .md → download images
-/// 4. Commit and push all at once
+/// 2. Read mirror categories from DB (should_mirror = TRUE)
+/// 3. Find unreplicated posts in those categories
+/// 4. For each post: fetch HTML → convert → write .md → download images
+/// 5. Commit and push all at once
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     info!("replicate_job: starting");
 
@@ -29,14 +30,19 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let crawler = NaverCrawler::new(ctx.config.clone(), ctx.http.clone());
     let image_handler = ImageHandler::new(ctx.http.clone(), &git_repo.repo_path());
 
-    let mirror_categories = &ctx.config.mirror_categories;
-    if mirror_categories.is_empty() {
-        info!("replicate_job: no mirror_categories configured, skipping");
+    // Read mirror targets from DB (manually toggled via should_mirror flag)
+    let mirror_cats = category_repo
+        .find_mirror_categories(&ctx.config.naver_blog_id)
+        .await?;
+    if mirror_cats.is_empty() {
+        info!("replicate_job: no categories with should_mirror=true in DB, skipping");
         return Ok(());
     }
+    let mirror_category_nos: Vec<i32> = mirror_cats.iter().map(|c| c.category_no).collect();
+    info!(categories = ?mirror_category_nos, "replicate_job: mirror categories");
 
     let posts = post_repo
-        .find_unreplicated_in_categories(&ctx.config.naver_blog_id, mirror_categories)
+        .find_unreplicated_in_categories(&ctx.config.naver_blog_id, &mirror_category_nos)
         .await?;
 
     if posts.is_empty() {
@@ -45,11 +51,8 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     }
     info!(count = posts.len(), "replicate_job: posts to replicate");
 
-    // Load all categories for name lookup
-    let all_categories = category_repo
-        .find_by_blog_id(&ctx.config.naver_blog_id)
-        .await?;
-    let cat_name_map: std::collections::HashMap<i32, String> = all_categories
+    // Build category name lookup from already-fetched mirror_cats
+    let cat_name_map: std::collections::HashMap<i32, String> = mirror_cats
         .into_iter()
         .map(|c| (c.category_no, c.name))
         .collect();
