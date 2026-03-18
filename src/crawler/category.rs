@@ -23,9 +23,13 @@ impl NaverCrawler {
         );
 
         info!("Fetching category list");
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
-            .header("Referer", format!("https://blog.naver.com/{}", self.config.naver_blog_id))
+            .header(
+                "Referer",
+                format!("https://blog.naver.com/{}", self.config.naver_blog_id),
+            )
             .send()
             .await?;
         let body = resp.text().await?;
