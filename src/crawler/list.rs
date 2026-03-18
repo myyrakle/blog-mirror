@@ -10,10 +10,72 @@ use super::NaverCrawler;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostListItem {
+    /// Naver returns logNo as a string (e.g. "224219853968")
+    #[serde(deserialize_with = "deserialize_string_or_i64")]
     pub log_no: i64,
     pub title: String,
+    #[serde(deserialize_with = "deserialize_optional_string_or_i32", default)]
     pub category_no: Option<i32>,
     pub add_date: Option<String>,
+}
+
+fn deserialize_string_or_i64<'de, D>(deserializer: D) -> std::result::Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, Unexpected, Visitor};
+    use std::fmt;
+
+    struct StringOrI64;
+    impl<'de> Visitor<'de> for StringOrI64 {
+        type Value = i64;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("an integer or string containing an integer")
+        }
+        fn visit_i64<E: Error>(self, v: i64) -> std::result::Result<i64, E> { Ok(v) }
+        fn visit_u64<E: Error>(self, v: u64) -> std::result::Result<i64, E> { Ok(v as i64) }
+        fn visit_str<E: Error>(self, v: &str) -> std::result::Result<i64, E> {
+            v.parse().map_err(|_| E::invalid_value(Unexpected::Str(v), &self))
+        }
+    }
+    deserializer.deserialize_any(StringOrI64)
+}
+
+fn deserialize_optional_string_or_i32<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, Unexpected, Visitor};
+    use std::fmt;
+
+    struct OptStringOrI32;
+    impl<'de> Visitor<'de> for OptStringOrI32 {
+        type Value = Option<i32>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("an integer, string containing an integer, or null")
+        }
+        fn visit_none<E: Error>(self) -> std::result::Result<Option<i32>, E> { Ok(None) }
+        fn visit_unit<E: Error>(self) -> std::result::Result<Option<i32>, E> { Ok(None) }
+        fn visit_i64<E: Error>(self, v: i64) -> std::result::Result<Option<i32>, E> { Ok(Some(v as i32)) }
+        fn visit_u64<E: Error>(self, v: u64) -> std::result::Result<Option<i32>, E> { Ok(Some(v as i32)) }
+        fn visit_str<E: Error>(self, v: &str) -> std::result::Result<Option<i32>, E> {
+            if v.is_empty() {
+                return Ok(None);
+            }
+            v.parse::<i32>()
+                .map(Some)
+                .map_err(|_| E::invalid_value(Unexpected::Str(v), &self))
+        }
+        fn visit_some<D2: serde::Deserializer<'de>>(
+            self,
+            d: D2,
+        ) -> std::result::Result<Option<i32>, D2::Error> {
+            deserialize_optional_string_or_i32(d)
+        }
+    }
+    deserializer.deserialize_any(OptStringOrI32)
 }
 
 impl PostListItem {
