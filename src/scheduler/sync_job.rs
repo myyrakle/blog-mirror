@@ -40,16 +40,16 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     let mut cats = Vec::new();
     for p in &new_posts {
-        if let Some(cat_no) = p.category_no {
-            if seen.insert(cat_no) {
-                cats.push(UpsertCategory {
-                    blog_id: ctx.config.naver_blog_id.clone(),
-                    category_no: cat_no,
-                    parent_no: None,
-                    name: format!("Category {}", cat_no),
-                    post_count: 0,
-                });
-            }
+        if let Some(cat_no) = p.category_no
+            && seen.insert(cat_no)
+        {
+            cats.push(UpsertCategory {
+                blog_id: ctx.config.naver_blog_id.clone(),
+                category_no: cat_no,
+                parent_no: None,
+                name: format!("Category {}", cat_no),
+                post_count: 0,
+            });
         }
     }
     category_repo.upsert_many(&cats).await?;

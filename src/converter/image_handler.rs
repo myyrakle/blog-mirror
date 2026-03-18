@@ -88,16 +88,15 @@ impl ImageHandler {
 /// Derives a safe local filename from a URL.
 /// Uses the last path segment; falls back to a hash-based name.
 fn derive_filename(url: &str) -> String {
-    if let Ok(parsed) = Url::parse(url) {
-        if let Some(segments) = parsed.path_segments() {
-            if let Some(last) = segments.last() {
-                let name = last.to_string();
-                if !name.is_empty() && name.contains('.') {
-                    // Strip query params from filename
-                    let clean = name.split('?').next().unwrap_or(&name);
-                    return sanitize_filename(clean);
-                }
-            }
+    if let Ok(parsed) = Url::parse(url)
+        && let Some(mut segments) = parsed.path_segments()
+        && let Some(last) = segments.next_back()
+    {
+        let name = last.to_string();
+        if !name.is_empty() && name.contains('.') {
+            // Strip query params from filename
+            let clean = name.split('?').next().unwrap_or(&name);
+            return sanitize_filename(clean);
         }
     }
     // Fallback: use a simple hash of the URL

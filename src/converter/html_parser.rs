@@ -61,7 +61,7 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         .split_whitespace()
         .collect();
 
-    let has_class = |name: &str| classes.iter().any(|c| *c == name);
+    let has_class = |name: &str| classes.contains(&name);
 
     // --- Headings ---
     for (i, prefix) in ["# ", "## ", "### ", "#### ", "##### ", "###### "]
@@ -106,7 +106,7 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         return;
     }
 
-    if tag == "code" && !el.parent().map_or(false, |p| ElementRef::wrap(p).map_or(false, |e| e.value().name() == "pre")) {
+    if tag == "code" && el.parent().is_none_or(|p| ElementRef::wrap(p).is_none_or(|e| e.value().name() != "pre")) {
         out.push('`');
         out.push_str(&el.text().collect::<String>());
         out.push('`');

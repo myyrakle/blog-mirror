@@ -44,16 +44,16 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut seen_categories = std::collections::HashSet::new();
     let mut categories_to_upsert = Vec::new();
     for post in &posts {
-        if let Some(cat_no) = post.category_no {
-            if seen_categories.insert(cat_no) {
-                categories_to_upsert.push(UpsertCategory {
-                    blog_id: ctx.config.naver_blog_id.clone(),
-                    category_no: cat_no,
-                    parent_no: None,
-                    name: format!("Category {}", cat_no), // name unknown from list API
-                    post_count: 0,
-                });
-            }
+        if let Some(cat_no) = post.category_no
+            && seen_categories.insert(cat_no)
+        {
+            categories_to_upsert.push(UpsertCategory {
+                blog_id: ctx.config.naver_blog_id.clone(),
+                category_no: cat_no,
+                parent_no: None,
+                name: format!("Category {}", cat_no), // name unknown from list API
+                post_count: 0,
+            });
         }
     }
     category_repo.upsert_many(&categories_to_upsert).await?;
