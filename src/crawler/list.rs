@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::error::{AppError, Result};
 
@@ -137,6 +137,7 @@ impl NaverCrawler {
         );
         let resp = self.client.get(&url).send().await?;
         let text = resp.text().await?;
+        let text = sanitize_json(&text);
 
         let parsed: PostListResponse =
             serde_json::from_str(&text).map_err(|e| AppError::Parse(e.to_string()))?;
@@ -144,37 +145,33 @@ impl NaverCrawler {
         Ok(parsed.post_list)
     }
 
-    /// Paginates from page 1, stopping when a post with log_no <= cursor is found
-    /// or when a page returns fewer items than count_per_page.
-    /// Pass cursor = 0 to fetch everything (initial sync).
-    pub async fn fetch_all_posts_until(&self, cursor: i64) -> Result<Vec<PostListItem>> {
-        let count_per_page = 30u32;
-        let mut all = Vec::new();
-        let mut page = 1u32;
 
-        loop {
-            info!(page, cursor, "Fetching Naver post list page");
-            let items = self.fetch_post_list_page(page, count_per_page).await?;
-            let fetched = items.len();
+}
 
-            let mut done = false;
-            for item in items {
-                if item.log_no <= cursor {
-                    done = true;
-                    break;
+/// Naver's API occasionally returns invalid JSON escape sequences (e.g. `\s`, `\p`).
+/// This function replaces any `\x` where x is not a valid JSON escape character
+/// with a space so that serde_json can parse the response.
+fn sanitize_json(s: &str) -> String {
+    let valid_escapes = ['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'];
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some(&next) if valid_escapes.contains(&next) => {
+                    out.push(ch);
                 }
-                all.push(item);
+                Some(_) => {
+                    // Invalid escape: drop the backslash
+                    out.push(' ');
+                    chars.next(); // consume the invalid char too
+                    continue;
+                }
+                None => {}
             }
-
-            if done || fetched < count_per_page as usize {
-                break;
-            }
-
-            page += 1;
-            self.rate_limit().await;
+        } else {
+            out.push(ch);
         }
-
-        info!(total = all.len(), "Finished fetching post list");
-        Ok(all)
     }
+    out
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use tracing::info;
 
@@ -15,65 +15,116 @@ use crate::{
 
 /// Periodic sync job:
 /// 1. Read current cursor
-/// 2. Fetch new posts since cursor
-/// 3. Upsert categories and posts
-/// 4. Update cursor
+/// 2. Fetch new posts page-by-page since cursor, upsert each page immediately
+/// 3. Update cursor after all pages are processed
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     info!("sync_job: starting");
 
     let cursor_repo = CursorRepo::new(ctx.pool.clone());
-    let category_repo = CategoryRepo::new(ctx.pool.clone());
-    let post_repo = PostRepo::new(ctx.pool.clone());
-    let crawler = NaverCrawler::new(ctx.config.clone(), ctx.http.clone());
-
     let cursor = cursor_repo.get_cursor(&ctx.config.naver_blog_id).await?;
     info!(cursor, "sync_job: current cursor");
 
-    let new_posts = crawler.fetch_all_posts_until(cursor).await?;
-    if new_posts.is_empty() {
+    let max_log_no = sync_pages(ctx.clone(), cursor).await?;
+
+    if let Some(max) = max_log_no {
+        cursor_repo.update_cursor(&ctx.config.naver_blog_id, max).await?;
+        info!(max_log_no = max, "sync_job: cursor updated");
+    } else {
         info!("sync_job: no new posts");
-        return Ok(());
     }
-    info!(count = new_posts.len(), "sync_job: fetched new posts");
-
-    // Upsert new categories
-    let mut seen = std::collections::HashSet::new();
-    let mut cats = Vec::new();
-    for p in &new_posts {
-        if let Some(cat_no) = p.category_no
-            && seen.insert(cat_no)
-        {
-            cats.push(UpsertCategory {
-                blog_id: ctx.config.naver_blog_id.clone(),
-                category_no: cat_no,
-                parent_no: None,
-                name: format!("Category {}", cat_no),
-                post_count: 0,
-            });
-        }
-    }
-    category_repo.upsert_many(&cats).await?;
-
-    // Upsert posts
-    let upsert_posts: Vec<UpsertPost> = new_posts
-        .iter()
-        .map(|p| UpsertPost {
-            blog_id: ctx.config.naver_blog_id.clone(),
-            log_no: p.log_no,
-            title: p.title.clone(),
-            category_no: p.category_no,
-            add_date: p.parsed_add_date(),
-        })
-        .collect();
-    post_repo.upsert_many(&upsert_posts).await?;
-
-    // Update cursor to new max
-    let max_log_no = new_posts.iter().map(|p| p.log_no).max().unwrap_or(cursor);
-    cursor_repo
-        .update_cursor(&ctx.config.naver_blog_id, max_log_no)
-        .await?;
-    info!(max_log_no, "sync_job: cursor updated");
 
     info!("sync_job: complete");
     Ok(())
+}
+
+/// Paginates Naver post list from page 1, stopping when log_no <= cursor.
+/// Upserts each page into DB immediately and saves the cursor after each page,
+/// so the process can be resumed if interrupted.
+/// Returns the highest log_no seen, or None if nothing was fetched.
+pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>> {
+    let crawler = NaverCrawler::new(ctx.config.clone(), ctx.http.clone());
+    let category_repo = CategoryRepo::new(ctx.pool.clone());
+    let post_repo = PostRepo::new(ctx.pool.clone());
+    let cursor_repo = CursorRepo::new(ctx.pool.clone());
+
+    let count_per_page = 30u32;
+    let mut page = 1u32;
+    let mut total = 0usize;
+    let mut max_log_no: Option<i64> = None;
+
+    loop {
+        info!(page, cursor, "Fetching Naver post list page");
+        let items = crawler.fetch_post_list_page(page, count_per_page).await?;
+        let fetched = items.len();
+
+        // Find items newer than cursor
+        let new_items: Vec<_> = items
+            .into_iter()
+            .take_while(|item| item.log_no > cursor)
+            .collect();
+
+        let done = new_items.len() < fetched; // hit the cursor boundary
+
+        if !new_items.is_empty() {
+            // Upsert categories from this page
+            let mut seen: HashSet<i32> = HashSet::new();
+            let cats: Vec<UpsertCategory> = new_items
+                .iter()
+                .filter_map(|p| p.category_no)
+                .filter(|&n| seen.insert(n))
+                .map(|cat_no| UpsertCategory {
+                    blog_id: ctx.config.naver_blog_id.clone(),
+                    category_no: cat_no,
+                    parent_no: None,
+                    name: format!("Category {}", cat_no),
+                    post_count: 0,
+                })
+                .collect();
+            category_repo.upsert_many(&cats).await?;
+
+            // Upsert posts from this page
+            let upsert_posts: Vec<UpsertPost> = new_items
+                .iter()
+                .map(|p| UpsertPost {
+                    blog_id: ctx.config.naver_blog_id.clone(),
+                    log_no: p.log_no,
+                    title: p.title.clone(),
+                    category_no: p.category_no,
+                    add_date: p.parsed_add_date(),
+                })
+                .collect();
+
+            // Use the minimum log_no of this page as cursor checkpoint,
+            // so a restart will re-fetch this page's boundary safely.
+            let page_min = new_items.iter().map(|p| p.log_no).min().unwrap_or(0);
+            let page_max = new_items.iter().map(|p| p.log_no).max().unwrap_or(0);
+
+            post_repo.upsert_many(&upsert_posts).await?;
+            total += new_items.len();
+            max_log_no = Some(max_log_no.unwrap_or(0).max(page_max));
+
+            // Save checkpoint: use (page_min - 1) so a restart re-fetches
+            // from just before the lowest log_no we've seen on this page.
+            cursor_repo
+                .update_cursor(&ctx.config.naver_blog_id, page_min - 1)
+                .await?;
+
+            info!(
+                page,
+                inserted = new_items.len(),
+                total,
+                checkpoint = page_min - 1,
+                "Upserted page"
+            );
+        }
+
+        if done || fetched < count_per_page as usize {
+            break;
+        }
+
+        page += 1;
+        crawler.rate_limit().await;
+    }
+
+    Ok(max_log_no)
 }
