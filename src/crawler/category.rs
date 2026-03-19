@@ -81,9 +81,17 @@ fn parse_categories(body: &str) -> std::result::Result<Vec<CategoryItem>, String
             continue; // skip "전체보기"
         }
 
-        let parent_no = extract_query_param(href, "parentCategoryNo")
+        // Parent info is encoded in the <li> class as `parentcategoryno_XX`.
+        // parentcategoryno_-1 means root (no parent).
+        // parentcategoryno_67 means this category's parent is 67.
+        // This is more reliable than the URL's parentCategoryNo param,
+        // which is absent from child category links.
+        let li_classes = li.value().attr("class").unwrap_or("");
+        let parent_no = li_classes
+            .split_whitespace()
+            .find_map(|cls| cls.strip_prefix("parentcategoryno_"))
             .and_then(|v| v.parse::<i32>().ok())
-            .filter(|&n| n != category_no); // parentNo == categoryNo means it's a root category
+            .filter(|&n| n >= 0); // -1 means root category
 
         // Category name: text of the anchor, excluding the post count span text
         let count_text = li

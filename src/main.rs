@@ -30,6 +30,8 @@ enum Commands {
     Sync,
     /// Start replication daemon: copies DB posts to GitHub blog (every 30 min)
     Replicate,
+    /// One-shot: fetch categories from Naver and upsert into DB
+    SyncCategories,
 }
 
 #[tokio::main]
@@ -57,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init => commands::init::run(ctx).await?,
         Commands::Sync => commands::sync::run(ctx).await?,
         Commands::Replicate => commands::replicate::run(ctx).await?,
+        Commands::SyncCategories => commands::sync_categories::run(ctx).await?,
     }
 
     Ok(())
