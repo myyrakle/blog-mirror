@@ -33,8 +33,6 @@ fn render_post(post: &MirroredPost) -> String {
         .map(|d| d.to_rfc3339())
         .unwrap_or_else(|| Utc::now().to_rfc3339());
 
-    let category_line = "categories = []\n";
-
     let tags_line = post
         .category_name
         .as_deref()
@@ -48,7 +46,7 @@ fn render_post(post: &MirroredPost) -> String {
 title = "{title}"
 date = {date}
 [taxonomies]
-{category_line}{tags_line}[extra]
+{tags_line}[extra]
 naver_log_no = {log_no}
 {category_no_line}+++
 
@@ -56,7 +54,6 @@ naver_log_no = {log_no}
 "#,
         title = title_escaped,
         date = date,
-        category_line = category_line,
         tags_line = tags_line,
         log_no = post.log_no,
         category_no_line = post
