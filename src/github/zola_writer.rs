@@ -33,13 +33,13 @@ fn render_post(post: &MirroredPost) -> String {
         .map(|d| d.to_rfc3339())
         .unwrap_or_else(|| Utc::now().to_rfc3339());
 
-    let category_line = post
+    let category_line = "categories = []\n";
+
+    let tags_line = post
         .category_name
         .as_deref()
-        .map(|c| format!("categories = [\"{}\"]\n", escape_toml_string(c)))
-        .unwrap_or_else(|| "categories = []\n".to_string());
-
-    let tags_line = "tags = []\n";
+        .map(|c| format!("tags = [\"{}\"]\n", escape_toml_string(c)))
+        .unwrap_or_else(|| "tags = []\n".to_string());
 
     let title_escaped = escape_toml_string(&post.title);
 
