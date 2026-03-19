@@ -39,11 +39,7 @@ fn render_post(post: &MirroredPost) -> String {
         .map(|c| format!("categories = [\"{}\"]\n", escape_toml_string(c)))
         .unwrap_or_else(|| "categories = []\n".to_string());
 
-    let tags_line = post
-        .category_name
-        .as_deref()
-        .map(|c| format!("tags = [\"{}\"]\n", escape_toml_string(c)))
-        .unwrap_or_else(|| "tags = []\n".to_string());
+    let tags_line = "tags = []\n";
 
     let title_escaped = escape_toml_string(&post.title);
 

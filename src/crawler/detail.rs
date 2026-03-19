@@ -28,12 +28,14 @@ fn extract_main_content(html: &str) -> String {
     let document = Html::parse_document(html);
 
     // SE3, legacy postViewArea, mobile SE2 content areas
+    // NOTE: .post_ct must come before ._postView because ._postView is the outer
+    // wrapper containing navigation, while .post_ct is the actual article content.
     for selector_str in &[
         ".se-main-container",
         "#postViewArea",
         ".post-view",
-        "._postView",
         ".post_ct",
+        "._postView",
     ] {
         if let Ok(sel) = Selector::parse(selector_str)
             && let Some(el) = document.select(&sel).next()

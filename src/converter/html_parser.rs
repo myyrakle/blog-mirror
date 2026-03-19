@@ -8,14 +8,22 @@ pub fn convert_html_to_markdown(html: &str) -> String {
 
     let content_sel = Selector::parse(".se-main-container").unwrap();
     let legacy_sel = Selector::parse("#postViewArea").unwrap();
+    let post_view_sel = Selector::parse("._postView").unwrap();
+    let post_ct_sel = Selector::parse(".post_ct").unwrap();
     let body_sel = Selector::parse("body").unwrap();
 
-    // Try se-main-container (outer_html case), then legacy, then body
-    // (body covers the case where we stored inner_html of se-main-container)
+    // Try selectors in priority order:
+    // 1. SE3 main container
+    // 2. Legacy postViewArea
+    // 3. SE2 .post_ct (actual content) — BEFORE ._postView which is the outer wrapper
+    // 4. SE2 ._postView (outer wrapper, fallback if .post_ct not present)
+    // 5. body — covers the case where we stored inner_html directly
     let root = document
         .select(&content_sel)
         .next()
         .or_else(|| document.select(&legacy_sel).next())
+        .or_else(|| document.select(&post_ct_sel).next())
+        .or_else(|| document.select(&post_view_sel).next())
         .or_else(|| document.select(&body_sel).next());
 
     if let Some(root) = root {
@@ -245,7 +253,11 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         // If anchor wraps an image, output the image instead of a link
         let img_sel = Selector::parse("img").unwrap();
         if let Some(img) = el.select(&img_sel).next() {
-            let src = img.value().attr("src").unwrap_or("");
+            let src = img
+                .value()
+                .attr("data-lazy-src")
+                .or_else(|| img.value().attr("src"))
+                .unwrap_or("");
             let alt = img.value().attr("alt").unwrap_or("image");
             if !src.is_empty() {
                 out.push_str(&format!("\n![{}]({})\n", alt, src));
@@ -305,8 +317,13 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         };
         let trimmed = inner.trim();
         if !trimmed.is_empty() {
-            out.push('\n');
+            // Use a hard line break (two trailing spaces) so consecutive non-empty
+            // paragraphs appear as separate lines without extra paragraph spacing.
+            // Naver's editor treats each Enter as a new <p>, not a new paragraph.
             out.push_str(trimmed);
+            out.push_str("  \n");
+        } else {
+            // Empty paragraph (ZWS-only) = blank line / paragraph break in Naver.
             out.push('\n');
         }
         return;
@@ -441,16 +458,22 @@ fn convert_table(el: ElementRef, out: &mut String) {
 
 fn normalize_blank_lines(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
-    let mut blank_count = 0usize;
+    let mut consecutive_blank = 0u32;
 
     for line in s.lines() {
         if line.trim().is_empty() {
-            blank_count += 1;
-            if blank_count <= 1 {
+            consecutive_blank += 1;
+            if consecutive_blank == 1 {
+                // First blank line: normal paragraph break
                 result.push('\n');
+            } else {
+                // Additional blank lines: CommonMark collapses these, so use
+                // a <br> HTML block to force visible line spacing.
+                // The surrounding blank lines terminate the HTML block properly.
+                result.push_str("<br>\n\n");
             }
         } else {
-            blank_count = 0;
+            consecutive_blank = 0;
             result.push_str(line);
             result.push('\n');
         }
