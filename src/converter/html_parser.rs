@@ -2,19 +2,25 @@ use scraper::{ElementRef, Html, Selector};
 
 /// Converts a Naver blog post HTML string into Markdown.
 /// Supports both Naver Smart Editor 3 (`se-main-container`) and legacy editor (`postViewArea`).
+/// Also handles the case where the input is the inner HTML of `se-main-container` (stored in DB).
 pub fn convert_html_to_markdown(html: &str) -> String {
     let document = Html::parse_document(html);
 
-    // Try SE3 first, then fall back to legacy
     let content_sel = Selector::parse(".se-main-container").unwrap();
     let legacy_sel = Selector::parse("#postViewArea").unwrap();
+    let body_sel = Selector::parse("body").unwrap();
 
-    if let Some(root) = document.select(&content_sel).next() {
-        convert_element(root)
-    } else if let Some(root) = document.select(&legacy_sel).next() {
+    // Try se-main-container (outer_html case), then legacy, then body
+    // (body covers the case where we stored inner_html of se-main-container)
+    let root = document
+        .select(&content_sel)
+        .next()
+        .or_else(|| document.select(&legacy_sel).next())
+        .or_else(|| document.select(&body_sel).next());
+
+    if let Some(root) = root {
         convert_element(root)
     } else {
-        // Fallback: just extract all text
         document
             .root_element()
             .text()
@@ -26,7 +32,6 @@ pub fn convert_html_to_markdown(html: &str) -> String {
 fn convert_element(element: ElementRef) -> String {
     let mut out = String::new();
     walk_element(element, &mut out, 0);
-    // Normalize excessive blank lines
     let normalized = normalize_blank_lines(&out);
     normalized.trim().to_string()
 }
@@ -38,8 +43,10 @@ fn walk_element(el: ElementRef, out: &mut String, list_depth: usize) {
         match child.value() {
             Node::Text(text) => {
                 let t = text.text.as_ref();
-                if !t.trim().is_empty() {
-                    out.push_str(t);
+                // Filter zero-width spaces (Naver editor artifact)
+                let filtered: String = t.chars().filter(|&c| c != '\u{200B}').collect();
+                if !filtered.trim().is_empty() {
+                    out.push_str(&filtered);
                 }
             }
             Node::Element(_) => {
@@ -63,6 +70,16 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
 
     let has_class = |name: &str| classes.contains(&name);
 
+    // --- Skip non-content tags ---
+    if tag == "script" || tag == "style" || tag == "noscript" {
+        return;
+    }
+
+    // --- Skip OG link preview widgets ---
+    if has_class("se-oglink") {
+        return;
+    }
+
     // --- Headings ---
     for (i, prefix) in ["# ", "## ", "### ", "#### ", "##### ", "###### "]
         .iter()
@@ -79,19 +96,36 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
     }
 
     // --- Code block ---
+    // SE3: .se-component.se-code contains .__se_code_view.language-XXX
     if has_class("se-code") || tag == "pre" {
+        let code_view_sel = Selector::parse(".__se_code_view").unwrap();
+        if let Some(code_view) = el.select(&code_view_sel).next() {
+            let lang = code_view
+                .value()
+                .attr("class")
+                .unwrap_or("")
+                .split_whitespace()
+                .find(|c| c.starts_with("language-"))
+                .map(|c| c.trim_start_matches("language-"))
+                .unwrap_or("");
+            out.push_str(&format!("\n```{}\n", lang));
+            out.push_str(code_view.text().collect::<String>().trim_end());
+            out.push_str("\n```\n");
+            return;
+        }
+        // Legacy: <pre><code class="language-xxx">
         out.push_str("\n```\n");
-        // Try to detect language from inner elements
         let code_sel = Selector::parse("code").unwrap();
         if let Some(code_el) = el.select(&code_sel).next() {
-            let lang = code_el.value().attr("class").unwrap_or("");
-            let lang = lang
+            let lang = code_el
+                .value()
+                .attr("class")
+                .unwrap_or("")
                 .split_whitespace()
                 .find(|c| c.starts_with("language-"))
                 .map(|c| c.trim_start_matches("language-"))
                 .unwrap_or("");
             if !lang.is_empty() {
-                // Replace the opening ``` with ```lang
                 let new_fence = format!("```{}\n", lang);
                 let len = out.len();
                 out.truncate(len - 4); // remove "\n```\n"
@@ -106,7 +140,11 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         return;
     }
 
-    if tag == "code" && el.parent().is_none_or(|p| ElementRef::wrap(p).is_none_or(|e| e.value().name() != "pre")) {
+    if tag == "code"
+        && el
+            .parent()
+            .is_none_or(|p| ElementRef::wrap(p).is_none_or(|e| e.value().name() != "pre"))
+    {
         out.push('`');
         out.push_str(&el.text().collect::<String>());
         out.push('`');
@@ -142,7 +180,6 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         let item_sel = Selector::parse("li").unwrap();
         let mut idx = 1usize;
         for item in el.select(&item_sel) {
-            // Only direct children
             if item.parent().map(|p| p.id()) != Some(el.id()) {
                 continue;
             }
@@ -181,7 +218,12 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
 
     // --- Image ---
     if tag == "img" {
-        let src = el.value().attr("src").unwrap_or("");
+        // Naver lazy-loads images: src = low-res placeholder, data-lazy-src = actual image
+        let src = el
+            .value()
+            .attr("data-lazy-src")
+            .or_else(|| el.value().attr("src"))
+            .unwrap_or("");
         let alt = el.value().attr("alt").unwrap_or("image");
         if !src.is_empty() {
             out.push_str(&format!("\n![{}]({})\n", alt, src));
@@ -192,8 +234,29 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
     // --- Anchor ---
     if tag == "a" {
         let href = el.value().attr("href").unwrap_or("#");
+
+        // Skip fragment-only links (Naver internal navigation: #ct, #, etc.)
+        // Output just the text content without creating a link.
+        if href == "#" || href.starts_with('#') {
+            walk_element(el, out, list_depth);
+            return;
+        }
+
+        // If anchor wraps an image, output the image instead of a link
+        let img_sel = Selector::parse("img").unwrap();
+        if let Some(img) = el.select(&img_sel).next() {
+            let src = img.value().attr("src").unwrap_or("");
+            let alt = img.value().attr("alt").unwrap_or("image");
+            if !src.is_empty() {
+                out.push_str(&format!("\n![{}]({})\n", alt, src));
+            }
+            return;
+        }
         let text = el.text().collect::<String>();
-        out.push_str(&format!("[{}]({})", text, href));
+        let text = text.trim();
+        if !text.is_empty() {
+            out.push_str(&format!("[{}]({})", text, href));
+        }
         return;
     }
 
@@ -217,12 +280,24 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         return;
     }
 
-    // --- Paragraph / block containers ---
-    if tag == "p"
-        || has_class("se-text-paragraph")
-        || has_class("se-module")
-        || has_class("se-section")
-    {
+    // --- Paragraph / text blocks ---
+    // Only match actual paragraph elements, not structural SE wrappers.
+    // se-section, se-module, se-component-content are structural divs — just recurse.
+    if tag == "p" || has_class("se-text-paragraph") {
+        // Detect Naver large-font styled headings (se-fs-fs24 etc.)
+        if let Some(prefix) = detect_naver_heading(el) {
+            let mut text = String::new();
+            push_plain_text(el, &mut text);
+            let text = text.trim().to_string();
+            if !text.is_empty() {
+                out.push('\n');
+                out.push_str(prefix);
+                out.push_str(&text);
+                out.push('\n');
+            }
+            return;
+        }
+
         let inner = {
             let mut buf = String::new();
             walk_element(el, &mut buf, list_depth);
@@ -238,13 +313,58 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
     }
 
     // --- Line break ---
+    // Two trailing spaces force a hard line break in Markdown.
+    // A bare \n is treated as a space by most renderers.
     if tag == "br" {
-        out.push('\n');
+        out.push_str("  \n");
         return;
     }
 
-    // --- Default: recurse ---
+    // --- Default: recurse into children ---
     walk_element(el, out, list_depth);
+}
+
+/// Detects Naver SE3 large-font styled headings (se-fs-fsXX class on span).
+/// Returns the markdown heading prefix if the paragraph should be a heading.
+fn detect_naver_heading(el: ElementRef) -> Option<&'static str> {
+    let span_sel = Selector::parse("span").unwrap();
+    for span in el.select(&span_sel) {
+        let classes = span.value().attr("class").unwrap_or("");
+        for class in classes.split_whitespace() {
+            if let Some(size_str) = class.strip_prefix("se-fs-fs") {
+                if let Ok(size) = size_str.parse::<u32>() {
+                    return match size {
+                        24.. => Some("## "),
+                        20..=23 => Some("### "),
+                        18..=19 => Some("#### "),
+                        _ => None,
+                    };
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Collects plain text from an element, stripping all formatting markers.
+/// Used for headings where bold/italic markers would look wrong (e.g. `## **text**`).
+fn push_plain_text(el: ElementRef, out: &mut String) {
+    use scraper::node::Node;
+    for child in el.children() {
+        match child.value() {
+            Node::Text(text) => {
+                let t = text.text.as_ref();
+                let filtered: String = t.chars().filter(|&c| c != '\u{200B}').collect();
+                out.push_str(&filtered);
+            }
+            Node::Element(_) => {
+                if let Some(child_el) = ElementRef::wrap(child) {
+                    push_plain_text(child_el, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Collect inline text content of an element, applying inline formatting.
@@ -254,7 +374,10 @@ fn push_inline_text(el: ElementRef, out: &mut String) {
     for child in el.children() {
         match child.value() {
             Node::Text(text) => {
-                out.push_str(text.text.as_ref());
+                let t = text.text.as_ref();
+                // Filter zero-width spaces
+                let filtered: String = t.chars().filter(|&c| c != '\u{200B}').collect();
+                out.push_str(&filtered);
             }
             Node::Element(_) => {
                 if let Some(child_el) = ElementRef::wrap(child) {
@@ -295,7 +418,6 @@ fn convert_table(el: ElementRef, out: &mut String) {
         return;
     }
 
-    // Determine column count
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
 
     for (i, row) in rows.iter().enumerate() {
@@ -306,7 +428,6 @@ fn convert_table(el: ElementRef, out: &mut String) {
         }
         out.push('\n');
 
-        // Insert separator after first header row
         if i == 0 && is_header_row.first().copied().unwrap_or(false) {
             out.push('|');
             for _ in 0..col_count {
@@ -325,7 +446,7 @@ fn normalize_blank_lines(s: &str) -> String {
     for line in s.lines() {
         if line.trim().is_empty() {
             blank_count += 1;
-            if blank_count <= 2 {
+            if blank_count <= 1 {
                 result.push('\n');
             }
         } else {
@@ -360,5 +481,30 @@ mod tests {
         let html = r#"<div class="se-main-container"><p><strong>bold text</strong></p></div>"#;
         let md = convert_html_to_markdown(html);
         assert!(md.contains("**bold text**"));
+    }
+
+    #[test]
+    fn test_code_block_se3() {
+        let html = r#"<div class="se-component se-code se-l-code_stripe"><div class="se-code-source"><div class="__se_code_view language-sql">SELECT 1;</div></div></div>"#;
+        let md = convert_html_to_markdown(html);
+        assert!(md.contains("```sql"));
+        assert!(md.contains("SELECT 1;"));
+        assert!(md.contains("```"));
+    }
+
+    #[test]
+    fn test_oglink_skipped() {
+        let html = r#"<div class="se-component se-oglink se-l-text"><a class="se-oglink-info" href="https://example.com"><strong class="se-oglink-title">Title</strong><p class="se-oglink-summary">Desc</p></a></div>"#;
+        let md = convert_html_to_markdown(html);
+        assert!(!md.contains("Title"));
+        assert!(!md.contains("Desc"));
+    }
+
+    #[test]
+    fn test_inner_html_fallback() {
+        // Simulates DB-stored inner HTML (no se-main-container wrapper)
+        let html = r#"<div class="se-component se-text se-l-default"><div class="se-component-content"><div class="se-section se-section-text"><div class="se-module se-module-text"><p class="se-text-paragraph">Hello from body</p></div></div></div></div>"#;
+        let md = convert_html_to_markdown(html);
+        assert!(md.contains("Hello from body"));
     }
 }

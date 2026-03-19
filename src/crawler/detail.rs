@@ -21,12 +21,20 @@ impl NaverCrawler {
     }
 }
 
-/// Extracts the inner HTML of `.se-main-container` (SE3) or `#postViewArea` (legacy).
-/// Falls back to the full HTML if neither is found.
+/// Extracts the inner HTML of the post content container.
+/// Tries SE3 and various legacy selectors in order.
+/// Falls back to the full HTML if none is found.
 fn extract_main_content(html: &str) -> String {
     let document = Html::parse_document(html);
 
-    for selector_str in &[".se-main-container", "#postViewArea", ".post-view"] {
+    // SE3, legacy postViewArea, mobile SE2 content areas
+    for selector_str in &[
+        ".se-main-container",
+        "#postViewArea",
+        ".post-view",
+        "._postView",
+        ".post_ct",
+    ] {
         if let Ok(sel) = Selector::parse(selector_str)
             && let Some(el) = document.select(&sel).next()
         {

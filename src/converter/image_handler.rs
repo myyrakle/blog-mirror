@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 
 use reqwest::Client;
 use tracing::{info, warn};
-use url::Url;
-
 use crate::error::Result;
 
 pub struct ImageHandler {
@@ -31,7 +29,12 @@ impl ImageHandler {
         std::fs::create_dir_all(&self.images_dir)?;
 
         info!(src_url, dest = ?dest_path, "Downloading image");
-        let resp = self.client.get(src_url).send().await?;
+        let resp = self
+            .client
+            .get(src_url)
+            .header("Referer", "https://blog.naver.com/")
+            .send()
+            .await?;
         let bytes = resp.bytes().await?;
         std::fs::write(&dest_path, &bytes)?;
 
@@ -68,7 +71,6 @@ impl ImageHandler {
                 match self.download_and_save(&url).await {
                     Ok(local_path) => {
                         result.replace_range(url_start..url_end, &local_path);
-                        // Adjust offset: local_path may be shorter or longer
                         offset = url_start + local_path.len() + 1;
                     }
                     Err(e) => {
@@ -85,34 +87,35 @@ impl ImageHandler {
     }
 }
 
-/// Derives a safe local filename from a URL.
-/// Uses the last path segment; falls back to a hash-based name.
+/// Derives a unique local filename from a URL.
+/// Always uses a hash of the full URL to avoid collisions (Naver images all end in `image.png`).
+/// Preserves the original file extension.
 fn derive_filename(url: &str) -> String {
-    if let Ok(parsed) = Url::parse(url)
-        && let Some(mut segments) = parsed.path_segments()
-        && let Some(last) = segments.next_back()
-    {
-        let name = last.to_string();
-        if !name.is_empty() && name.contains('.') {
-            // Strip query params from filename
-            let clean = name.split('?').next().unwrap_or(&name);
-            return sanitize_filename(clean);
-        }
-    }
-    // Fallback: use a simple hash of the URL
     let hash = simple_hash(url);
-    format!("img_{:x}.jpg", hash)
+    let ext = extract_extension(url).unwrap_or("jpg");
+    format!("img_{:016x}.{}", hash, ext)
 }
 
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
-        .collect()
+/// Extracts the file extension from the URL path, ignoring query params.
+fn extract_extension(url: &str) -> Option<&str> {
+    let path = if let Some(q) = url.find('?') {
+        &url[..q]
+    } else {
+        url
+    };
+    let last_segment = path.rsplit('/').next()?;
+    let ext = last_segment.rsplit('.').next()?;
+    // Only accept short, sane extensions
+    if ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphabetic()) {
+        Some(ext)
+    } else {
+        None
+    }
 }
 
 fn simple_hash(s: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()

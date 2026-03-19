@@ -39,6 +39,12 @@ fn render_post(post: &MirroredPost) -> String {
         .map(|c| format!("categories = [\"{}\"]\n", escape_toml_string(c)))
         .unwrap_or_else(|| "categories = []\n".to_string());
 
+    let tags_line = post
+        .category_name
+        .as_deref()
+        .map(|c| format!("tags = [\"{}\"]\n", escape_toml_string(c)))
+        .unwrap_or_else(|| "tags = []\n".to_string());
+
     let title_escaped = escape_toml_string(&post.title);
 
     format!(
@@ -46,8 +52,7 @@ fn render_post(post: &MirroredPost) -> String {
 title = "{title}"
 date = {date}
 [taxonomies]
-{category_line}tags = []
-[extra]
+{category_line}{tags_line}[extra]
 naver_log_no = {log_no}
 {category_no_line}+++
 
@@ -56,6 +61,7 @@ naver_log_no = {log_no}
         title = title_escaped,
         date = date,
         category_line = category_line,
+        tags_line = tags_line,
         log_no = post.log_no,
         category_no_line = post
             .category_no
