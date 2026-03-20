@@ -163,7 +163,11 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    Ok(url_decode(&s))
+    let decoded = url_decode(&s);
+    // Strip control characters (e.g. \b U+0008 from JSON \b escape sequences).
+    // These are invalid in TOML basic strings and meaningless in titles.
+    let clean: String = decoded.chars().filter(|c| !c.is_control()).collect();
+    Ok(clean)
 }
 
 /// Decodes a URL-form-encoded string (e.g. `%EC%9D%84` → `을`, `+` → ` `).
