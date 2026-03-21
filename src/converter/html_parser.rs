@@ -41,7 +41,8 @@ fn convert_element(element: ElementRef) -> String {
     let mut out = String::new();
     walk_element(element, &mut out, 0);
     let normalized = normalize_blank_lines(&out);
-    normalized.trim().to_string()
+    let escaped = escape_empty_links(&normalized);
+    escaped.trim().to_string()
 }
 
 fn walk_element(el: ElementRef, out: &mut String, list_depth: usize) {
@@ -454,6 +455,27 @@ fn convert_table(el: ElementRef, out: &mut String) {
         }
     }
     out.push('\n');
+}
+
+/// Escapes `[](` patterns (empty-text links) that Zola rejects with
+/// "link missing a URL". These appear when C++ lambda syntax like `[]()` or
+/// `[](int i)` ends up as plain text outside a code block.
+fn escape_empty_links(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_code_block = false;
+    for line in s.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code_block = !in_code_block;
+            result.push_str(line);
+        } else if in_code_block {
+            result.push_str(line);
+        } else {
+            // Outside code blocks: escape `[](` → `\[\](`
+            result.push_str(&line.replace("[](", "\\[\\]("));
+        }
+        result.push('\n');
+    }
+    result
 }
 
 fn normalize_blank_lines(s: &str) -> String {
