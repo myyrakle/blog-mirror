@@ -164,10 +164,69 @@ where
 {
     let s = String::deserialize(deserializer)?;
     let decoded = url_decode(&s);
+    let decoded = decode_html_entities(&decoded);
     // Strip control characters (e.g. \b U+0008 from JSON \b escape sequences).
-    // These are invalid in TOML basic strings and meaningless in titles.
     let clean: String = decoded.chars().filter(|c| !c.is_control()).collect();
     Ok(clean)
+}
+
+/// Decodes HTML entities in a string.
+/// Handles named entities (&amp; &lt; &gt; &quot; &apos; &nbsp;),
+/// decimal numeric (&#39;), and hex numeric (&#x27;) entities.
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+
+        let Some(semi) = rest.find(';') else {
+            // No closing semicolon — treat as literal text
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+
+        let entity = &rest[..=semi]; // includes & and ;
+        let inner = &rest[1..semi];  // between & and ;
+
+        let replacement = if let Some(hex) = inner.strip_prefix("#x").or_else(|| inner.strip_prefix("#X")) {
+            u32::from_str_radix(hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+        } else if let Some(dec) = inner.strip_prefix('#') {
+            dec.parse::<u32>()
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+        } else {
+            match inner {
+                "amp"  => Some("&".into()),
+                "lt"   => Some("<".into()),
+                "gt"   => Some(">".into()),
+                "quot" => Some("\"".into()),
+                "apos" => Some("'".into()),
+                "nbsp" => Some(" ".into()),
+                "copy" => Some("©".into()),
+                "reg"  => Some("®".into()),
+                _      => None,
+            }
+        };
+
+        if let Some(rep) = replacement {
+            out.push_str(&rep);
+            rest = &rest[entity.len()..];
+        } else {
+            // Unknown entity — keep as-is
+            out.push('&');
+            rest = &rest[1..];
+        }
+    }
+
+    out.push_str(rest);
+    out
 }
 
 /// Decodes a URL-form-encoded string (e.g. `%EC%9D%84` → `을`, `+` → ` `).
