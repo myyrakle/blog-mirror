@@ -470,8 +470,10 @@ fn escape_empty_links(s: &str) -> String {
         } else if in_code_block {
             result.push_str(line);
         } else {
-            // Outside code blocks: escape `[](` → `\[\](`
-            result.push_str(&line.replace("[](", "\\[\\]("));
+            // Outside code blocks: escape `]()` (empty-URL link) → `\]()`
+            // Handles C++ lambda captures like [&a]() or []() that Zola
+            // rejects as "link missing a URL".
+            result.push_str(&line.replace("]()", "\\]()"));
         }
         result.push('\n');
     }
