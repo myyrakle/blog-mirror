@@ -51,10 +51,10 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     }
     info!(count = posts.len(), "replicate_job: posts to replicate");
 
-    // Build category name lookup from already-fetched mirror_cats
+    // Build category name lookup: use display_name if set, else name
     let cat_name_map: std::collections::HashMap<i32, String> = mirror_cats
         .into_iter()
-        .map(|c| (c.category_no, c.name))
+        .map(|c| (c.category_no, c.effective_name().to_string()))
         .collect();
 
     let mut replicated_count = 0usize;

@@ -11,10 +11,18 @@ pub struct CategoryRecord {
     pub category_no: i32,
     pub parent_no: Option<i32>,
     pub name: String,
+    pub display_name: Option<String>,
     pub post_count: i32,
     pub should_mirror: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl CategoryRecord {
+    /// Returns display_name if set, otherwise falls back to name.
+    pub fn effective_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 pub struct CategoryRepo {
@@ -87,7 +95,7 @@ impl CategoryRepo {
     #[allow(dead_code)]
     pub async fn find_by_blog_id(&self, blog_id: &str) -> Result<Vec<CategoryRecord>> {
         let rows = sqlx::query_as::<_, CategoryRecord>(
-            "SELECT id, blog_id, category_no, parent_no, name, post_count, should_mirror, created_at, updated_at
+            "SELECT id, blog_id, category_no, parent_no, name, display_name, post_count, should_mirror, created_at, updated_at
              FROM categories WHERE blog_id = $1 ORDER BY category_no",
         )
         .bind(blog_id)
@@ -98,7 +106,7 @@ impl CategoryRepo {
 
     pub async fn find_mirror_categories(&self, blog_id: &str) -> Result<Vec<CategoryRecord>> {
         let rows = sqlx::query_as::<_, CategoryRecord>(
-            "SELECT id, blog_id, category_no, parent_no, name, post_count, should_mirror, created_at, updated_at
+            "SELECT id, blog_id, category_no, parent_no, name, display_name, post_count, should_mirror, created_at, updated_at
              FROM categories WHERE blog_id = $1 AND should_mirror = TRUE ORDER BY category_no",
         )
         .bind(blog_id)
