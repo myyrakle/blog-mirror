@@ -1,4 +1,5 @@
+pub mod fetch;
 pub mod init;
-pub mod replicate;
-pub mod sync;
+pub mod publish;
 pub mod sync_categories;
+pub mod sync_loop;

@@ -24,22 +24,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run initial full sync of Naver blog to database
+    /// Run initial full sync of all Naver blog posts to database
     Init,
-    /// Start sync daemon: crawls Naver blog and stores posts in DB (hourly)
-    Sync,
-    /// Start replication daemon: copies DB posts to GitHub blog (every 30 min)
-    Replicate,
+    /// One-shot: fetch new posts from Naver and store in DB
+    Fetch,
+    /// One-shot: replicate posts from DB to GitHub blog
+    Publish,
     /// One-shot: fetch categories from Naver and upsert into DB
     SyncCategories,
+    /// Infinite loop: runs fetch + publish on a fixed interval (default 3600s)
+    SyncLoop {
+        /// Interval between runs in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        interval: u64,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load .env file if present
     dotenvy::dotenv().ok();
 
-    // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -57,9 +61,10 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Init => commands::init::run(ctx).await?,
-        Commands::Sync => commands::sync::run(ctx).await?,
-        Commands::Replicate => commands::replicate::run(ctx).await?,
+        Commands::Fetch => commands::fetch::run(ctx).await?,
+        Commands::Publish => commands::publish::run(ctx).await?,
         Commands::SyncCategories => commands::sync_categories::run(ctx).await?,
+        Commands::SyncLoop { interval } => commands::sync_loop::run(ctx, interval).await?,
     }
 
     Ok(())
