@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-mirror
+  namespace: default
+  labels:
+    app: blog-mirror
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blog-mirror
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: blog-mirror
+    spec:
+      containers:
+        - name: blog-mirror
+          image: myyrakle/blog-mirror:v0.1.0
+          imagePullPolicy: Always
+          args: ["sync-loop", "--interval", "3600"]
+          envFrom:
+            - secretRef:
+                name: blog-mirror-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always
