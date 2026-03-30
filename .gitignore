@@ -29,3 +29,6 @@ target
 
 
 *.html
+
+*.yaml
+!k8s/
