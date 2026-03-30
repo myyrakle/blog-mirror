@@ -7,8 +7,8 @@ edition = "2024"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
+# HTTP client (rustls-tls: pure-Rust TLS, no OpenSSL C library required)
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "stream", "rustls-tls"] }
 
 # HTML parsing
 scraper = "0.22"

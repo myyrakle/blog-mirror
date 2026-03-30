@@ -3,12 +3,15 @@ FROM rust:1.93-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (git2 needs libssl, libgit2; sqlx needs pkgconfig)
+# musl targets link statically by default; disable that so we can use
+# shared system libraries (libgit2.so). reqwest uses rustls (pure Rust),
+# so no OpenSSL C library is needed.
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+
 RUN apk add --no-cache \
     pkgconfig \
-    openssl-dev \
-    libgit2-dev \
-    musl-dev
+    musl-dev \
+    libgit2-dev
 
 # Cache dependencies separately from source
 COPY Cargo.toml Cargo.lock ./
@@ -26,9 +29,7 @@ FROM alpine:3
 
 RUN apk add --no-cache \
     ca-certificates \
-    openssl \
-    libgit2 \
-    git
+    libgit2
 
 WORKDIR /app
 
