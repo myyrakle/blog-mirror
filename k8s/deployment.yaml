@@ -17,6 +17,12 @@ spec:
       labels:
         app: blog-mirror
     spec:
+      # k3s: 호스트 localhost에 접근하려면 노드 IP를 host-gateway로 매핑
+      # IP는 `kubectl get nodes -o wide`의 INTERNAL-IP 값으로 교체
+      hostAliases:
+        - ip: "192.168.0.1"
+          hostnames:
+            - "host-gateway"
       containers:
         - name: blog-mirror
           image: myyrakle/blog-mirror:v0.1.0
