@@ -1,14 +1,14 @@
 # ── Build stage ─────────────────────────────────────────────────────────────
-FROM rust:1.93-slim AS builder
+FROM rust:1.93-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies (git2 needs libssl, libgit2; sqlx needs pkg-config)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config \
-    libssl-dev \
+# Install build dependencies (git2 needs libssl, libgit2; sqlx needs pkgconfig)
+RUN apk add --no-cache \
+    pkgconfig \
+    openssl-dev \
     libgit2-dev \
-    && rm -rf /var/lib/apt/lists/*
+    musl-dev
 
 # Cache dependencies separately from source
 COPY Cargo.toml Cargo.lock ./
@@ -22,14 +22,13 @@ COPY migrations ./migrations
 RUN touch src/main.rs && cargo build --release
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM alpine:3
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     ca-certificates \
-    libssl3 \
-    libgit2-1.5 \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+    openssl \
+    libgit2 \
+    git
 
 WORKDIR /app
 
