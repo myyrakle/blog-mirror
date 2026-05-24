@@ -29,6 +29,7 @@ FROM alpine:3
 
 RUN apk add --no-cache \
     ca-certificates \
+    libgcc \
     libgit2
 
 WORKDIR /app
