@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: blog-mirror
-          image: myyrakle/blog-mirror:v0.1.1
+          image: myyrakle/blog-mirror:v0.1.2
           imagePullPolicy: Always
           args: ["sync-loop", "--interval", "3600"]
           securityContext:
