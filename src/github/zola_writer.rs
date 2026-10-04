@@ -89,7 +89,7 @@ mod tests {
         let rendered = render_post(&post);
         assert!(rendered.contains("title = \"Test \\\"Post\\\"\""));
         assert!(rendered.contains("naver_log_no = 12345"));
-        assert!(rendered.contains("categories = [\"Programming\"]"));
+        assert!(rendered.contains("tags = [\"Programming\"]"));
         assert!(rendered.contains("Hello World"));
     }
 }

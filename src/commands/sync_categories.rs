@@ -10,7 +10,8 @@ use crate::{
 };
 
 /// One-shot category sync: fetches all categories from Naver and upserts them into DB.
-pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
+/// Returns the number of categories upserted.
+pub async fn run(ctx: Arc<AppContext>) -> Result<usize> {
     info!("sync-categories: starting");
 
     let crawler = NaverCrawler::new(ctx.config.clone(), ctx.http.clone());
@@ -33,5 +34,5 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     category_repo.upsert_many(&upsert_cats).await?;
 
     info!(count, "sync-categories: upserted all categories");
-    Ok(())
+    Ok(count)
 }

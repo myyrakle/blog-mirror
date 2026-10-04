@@ -8,5 +8,7 @@ use crate::{context::AppContext, db::run_migrations, error::Result, scheduler::s
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     run_migrations(&ctx.pool).await?;
     info!("Migrations complete");
-    sync_job::run(ctx).await
+    let report = sync_job::run(ctx).await?;
+    info!(new_posts = report.new_posts, "fetch: done");
+    Ok(())
 }

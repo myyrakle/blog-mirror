@@ -19,9 +19,15 @@ spec:
     spec:
       containers:
         - name: blog-mirror
-          image: myyrakle/blog-mirror:v0.1.1
+          image: myyrakle/blog-mirror:v0.2.0
           imagePullPolicy: Always
-          args: ["sync-loop", "--interval", "3600"]
+          # `serve` runs the admin dashboard *and* the periodic sync in one
+          # process, so a scheduled run and a dashboard-triggered run can never
+          # write to the git checkout at the same time.
+          args: ["serve", "--interval", "3600"]
+          ports:
+            - name: http
+              containerPort: 8080
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
@@ -31,6 +37,14 @@ spec:
           volumeMounts:
             - name: blog-repo
               mountPath: /data/blog
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
           resources:
             requests:
               cpu: 100m
@@ -45,3 +59,18 @@ spec:
             path: /path/to/blog-mirror-clone
             type: Directory
       restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blog-mirror
+  namespace: default
+  labels:
+    app: blog-mirror
+spec:
+  selector:
+    app: blog-mirror
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -8,5 +8,7 @@ use crate::{context::AppContext, db::run_migrations, error::Result, scheduler::r
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     run_migrations(&ctx.pool).await?;
     info!("Migrations complete");
-    replicate_job::run(ctx).await
+    let report = replicate_job::run(ctx).await?;
+    info!(replicated = report.replicated, failed = report.failed, "publish: done");
+    Ok(())
 }

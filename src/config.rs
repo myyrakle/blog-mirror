@@ -28,10 +28,27 @@ pub struct AppConfig {
     /// Delay between Naver requests in milliseconds (default 1000)
     #[serde(default = "default_crawl_delay_ms")]
     pub crawl_delay_ms: u64,
+
+    /// Port the admin dashboard listens on (default 8080)
+    #[serde(default = "default_web_port")]
+    pub web_port: u16,
+
+    /// HTTP Basic auth username for the dashboard.
+    /// Auth is disabled unless both username and password are set.
+    #[serde(default)]
+    pub web_username: Option<String>,
+
+    /// HTTP Basic auth password for the dashboard
+    #[serde(default)]
+    pub web_password: Option<String>,
 }
 
 fn default_crawl_delay_ms() -> u64 {
     1000
+}
+
+fn default_web_port() -> u16 {
+    8080
 }
 
 impl AppConfig {

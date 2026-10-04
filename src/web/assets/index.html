@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>blog-mirror 관리자</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪞</text></svg>">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🪞</span>
+    <div>
+      <h1>blog-mirror</h1>
+      <p class="sub" id="blog-id">…</p>
+    </div>
+  </div>
+  <div class="job-indicator" id="job-indicator" hidden>
+    <span class="spinner"></span>
+    <span id="job-indicator-text"></span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="dashboard">대시보드</button>
+  <button class="tab" data-tab="categories">카테고리</button>
+  <button class="tab" data-tab="posts">게시글</button>
+  <button class="tab" data-tab="jobs">작업 로그</button>
+</nav>
+
+<main>
+  <!-- ── 대시보드 ─────────────────────────────────────────────── -->
+  <section class="panel active" id="panel-dashboard">
+    <div class="stat-grid" id="stat-grid"></div>
+
+    <div class="card">
+      <h2>수동 동기화</h2>
+      <p class="hint">한 번에 하나의 작업만 실행됩니다. 진행 상황은 아래 로그에 실시간으로 표시됩니다.</p>
+      <div class="btn-row">
+        <button class="btn" data-job="sync-categories">카테고리 동기화</button>
+        <button class="btn" data-job="fetch">게시글 수집 (fetch)</button>
+        <button class="btn" data-job="publish">GitHub 복제 (publish)</button>
+        <button class="btn primary" data-job="fetch-and-publish">전체 동기화 (fetch + publish)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>현재 작업</h2>
+        <span class="badge" id="current-job-badge">대기 중</span>
+      </div>
+      <p class="job-meta" id="current-job-meta">최근 실행된 작업이 없습니다.</p>
+      <pre class="log" id="live-log"></pre>
+    </div>
+
+    <div class="card">
+      <h2>저장소</h2>
+      <dl class="kv" id="repo-info"></dl>
+    </div>
+  </section>
+
+  <!-- ── 카테고리 ─────────────────────────────────────────────── -->
+  <section class="panel" id="panel-categories">
+    <div class="card">
+      <div class="card-head">
+        <h2>카테고리 매핑</h2>
+        <button class="btn small" data-job="sync-categories">네이버에서 다시 가져오기</button>
+      </div>
+      <p class="hint">
+        <b>복제</b>를 켠 카테고리의 글만 GitHub 블로그로 발행됩니다.
+        <b>표시 이름</b>을 지정하면 글 태그에 네이버 원본 이름 대신 그 이름이 쓰입니다. (비우면 원본 이름 사용)
+      </p>
+      <div class="btn-row" id="cat-bulk" hidden>
+        <span class="selected-count" id="cat-selected-count"></span>
+        <button class="btn small" id="cat-mirror-on">복제 켜기</button>
+        <button class="btn small" id="cat-mirror-off">복제 끄기</button>
+        <button class="btn small warn" id="cat-resync">선택 카테고리 전체 재동기화</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="cat-table">
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="cat-check-all"></th>
+              <th class="col-no">번호</th>
+              <th>네이버 카테고리</th>
+              <th>표시 이름 (태그)</th>
+              <th class="col-num">네이버</th>
+              <th class="col-num">수집</th>
+              <th class="col-num">복제됨</th>
+              <th class="col-mirror">복제</th>
+            </tr>
+          </thead>
+          <tbody id="cat-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 게시글 ───────────────────────────────────────────────── -->
+  <section class="panel" id="panel-posts">
+    <div class="card">
+      <div class="card-head">
+        <h2>게시글</h2>
+        <span class="muted" id="post-total"></span>
+      </div>
+      <div class="filters">
+        <input type="search" id="post-q" placeholder="제목 또는 logNo 검색">
+        <select id="post-category"><option value="">모든 카테고리</option></select>
+        <select id="post-status">
+          <option value="all">전체 상태</option>
+          <option value="pending">미복제</option>
+          <option value="replicated">복제 완료</option>
+          <option value="error">오류</option>
+          <option value="unfetched">본문 미수집</option>
+        </select>
+        <button class="btn small" id="post-search">검색</button>
+      </div>
+
+      <div class="btn-row" id="post-bulk" hidden>
+        <span class="selected-count" id="post-selected-count"></span>
+        <button class="btn small primary" id="post-resync-refetch">네이버에서 다시 받아 재발행</button>
+        <button class="btn small" id="post-resync">저장된 본문으로 재발행</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="grid" id="post-table">
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="post-check-all"></th>
+              <th class="col-no">logNo</th>
+              <th>제목</th>
+              <th>카테고리</th>
+              <th class="col-date">작성일</th>
+              <th class="col-status">상태</th>
+              <th class="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody id="post-body"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="post-pager"></div>
+    </div>
+  </section>
+
+  <!-- ── 작업 로그 ────────────────────────────────────────────── -->
+  <section class="panel" id="panel-jobs">
+    <div class="card">
+      <div class="card-head">
+        <h2>실행 이력</h2>
+        <button class="btn small" id="jobs-refresh">새로고침</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="jobs-table">
+          <thead>
+            <tr>
+              <th class="col-no">#</th>
+              <th>작업</th>
+              <th class="col-status">상태</th>
+              <th>결과</th>
+              <th class="col-date">시작</th>
+              <th class="col-date">소요</th>
+              <th class="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="btn small" id="modal-close">닫기</button>
+    </div>
+    <pre class="log" id="modal-body"></pre>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

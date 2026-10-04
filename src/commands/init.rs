@@ -27,13 +27,14 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         info!(cursor, "Resuming from previous checkpoint");
     }
 
-    if let Some(max_log_no) = sync_pages(ctx.clone(), cursor).await? {
+    let report = sync_pages(ctx.clone(), cursor).await?;
+    if let Some(max_log_no) = report.max_log_no {
         // Save the final max so future syncs only fetch newer posts
         cursor_repo
             .update_cursor(&ctx.config.naver_blog_id, max_log_no)
             .await?;
         info!(max_log_no, "Updated sync cursor");
-        info!("Initial sync complete");
+        info!(new_posts = report.new_posts, "Initial sync complete");
     } else {
         info!("No new posts found. Done.");
     }

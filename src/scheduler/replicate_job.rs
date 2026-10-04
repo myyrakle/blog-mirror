@@ -17,7 +17,14 @@ use crate::{
 /// 3. Find unreplicated posts in those categories
 /// 4. For each post: fetch HTML → convert → write .md → download images
 /// 5. Commit and push all at once
-pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReplicateReport {
+    pub replicated: usize,
+    pub failed: usize,
+    pub pushed: bool,
+}
+
+pub async fn run(ctx: Arc<AppContext>) -> Result<ReplicateReport> {
     info!("replicate_job: starting");
 
     let git_repo = GitRepo::open_or_clone(ctx.config.clone())?;
@@ -35,8 +42,8 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         .find_mirror_categories(&ctx.config.naver_blog_id)
         .await?;
     if mirror_cats.is_empty() {
-        info!("replicate_job: no categories with should_mirror=true in DB, skipping");
-        return Ok(());
+        warn!("replicate_job: no categories with should_mirror=true in DB, skipping");
+        return Ok(ReplicateReport::default());
     }
     let mirror_category_nos: Vec<i32> = mirror_cats.iter().map(|c| c.category_no).collect();
     info!(categories = ?mirror_category_nos, "replicate_job: mirror categories");
@@ -47,7 +54,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
 
     if posts.is_empty() {
         info!("replicate_job: no posts to replicate");
-        return Ok(());
+        return Ok(ReplicateReport::default());
     }
     info!(count = posts.len(), "replicate_job: posts to replicate");
 
@@ -58,6 +65,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         .collect();
 
     let mut replicated_count = 0usize;
+    let mut failed_count = 0usize;
 
     for post in &posts {
         info!(log_no = post.log_no, title = %post.title, "Replicating post");
@@ -77,6 +85,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                             &e.to_string(),
                         )
                         .await?;
+                    failed_count += 1;
                     continue;
                 }
             }
@@ -110,6 +119,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
             post_repo
                 .mark_replication_error(&ctx.config.naver_blog_id, post.log_no, &e.to_string())
                 .await?;
+            failed_count += 1;
             continue;
         }
 
@@ -121,20 +131,26 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         crawler.rate_limit().await;
     }
 
+    let mut pushed = false;
     if replicated_count > 0 {
         info!(replicated_count, "Committing and pushing to GitHub");
         git_repo.add_all()?;
 
         if git_repo.has_staged_changes()? {
-            let msg = format!("mirror: add {} post(s) from Naver blog", replicated_count);
+            let msg = format!("mirror: sync {} post(s) from Naver blog", replicated_count);
             git_repo.commit(&msg)?;
             git_repo.push()?;
+            pushed = true;
             info!("replicate_job: push complete");
         } else {
             info!("replicate_job: no changes to push");
         }
     }
 
-    info!(replicated_count, "replicate_job: complete");
-    Ok(())
+    info!(replicated_count, failed_count, "replicate_job: complete");
+    Ok(ReplicateReport {
+        replicated: replicated_count,
+        failed: failed_count,
+        pushed,
+    })
 }

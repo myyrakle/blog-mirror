@@ -7,11 +7,14 @@ mod db;
 mod error;
 mod github;
 mod scheduler;
+mod web;
 
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::{config::AppConfig, context::AppContext, db::create_pool};
 
@@ -38,17 +41,29 @@ enum Commands {
         #[arg(long, default_value_t = 3600)]
         interval: u64,
     },
+    /// Run the admin web dashboard (optionally with the periodic sync built in)
+    Serve {
+        /// Port to listen on (defaults to WEB_PORT, or 8080)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Also run fetch + publish on this interval, in seconds. 0 disables it.
+        #[arg(long, default_value_t = 3600)]
+        interval: u64,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    // `JobLogLayer` tees job output into the dashboard's live log view.
+    tracing_subscriber::registry()
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
+        .with(tracing_subscriber::fmt::layer())
+        .with(web::jobs::JobLogLayer)
         .init();
 
     let cli = Cli::parse();
@@ -63,8 +78,14 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init => commands::init::run(ctx).await?,
         Commands::Fetch => commands::fetch::run(ctx).await?,
         Commands::Publish => commands::publish::run(ctx).await?,
-        Commands::SyncCategories => commands::sync_categories::run(ctx).await?,
+        Commands::SyncCategories => {
+            commands::sync_categories::run(ctx).await?;
+        }
         Commands::SyncLoop { interval } => commands::sync_loop::run(ctx, interval).await?,
+        Commands::Serve { port, interval } => {
+            let port = port.unwrap_or(ctx.config.web_port);
+            web::serve(ctx, port, interval).await?
+        }
     }
 
     Ok(())

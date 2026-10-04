@@ -37,5 +37,7 @@ WORKDIR /app
 COPY --from=builder /app/target/release/blog-mirror /usr/local/bin/blog-mirror
 COPY --from=builder /app/migrations ./migrations
 
+EXPOSE 8080
+
 ENTRYPOINT ["blog-mirror"]
-CMD ["sync-loop"]
+CMD ["serve"]
