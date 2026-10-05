@@ -185,7 +185,9 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
 
     // --- Ordered list ---
     if tag == "ol" {
-        out.push('\n');
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
         let item_sel = Selector::parse("li").unwrap();
         let mut idx = 1usize;
         for item in el.select(&item_sel) {
@@ -193,9 +195,7 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
                 continue;
             }
             let indent = "   ".repeat(list_depth);
-            out.push_str(&format!("{}{}. ", indent, idx));
-            push_inline_text(item, out);
-            out.push('\n');
+            push_list_item(item, out, &format!("{}{}. ", indent, idx));
             idx += 1;
         }
         out.push('\n');
@@ -204,16 +204,16 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
 
     // --- Unordered list ---
     if tag == "ul" {
-        out.push('\n');
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
         let item_sel = Selector::parse("li").unwrap();
         for item in el.select(&item_sel) {
             if item.parent().map(|p| p.id()) != Some(el.id()) {
                 continue;
             }
             let indent = "   ".repeat(list_depth);
-            out.push_str(&format!("{}- ", indent));
-            push_inline_text(item, out);
-            out.push('\n');
+            push_list_item(item, out, &format!("{}- ", indent));
         }
         out.push('\n');
         return;
@@ -362,6 +362,31 @@ fn detect_naver_heading(el: ElementRef) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// Renders a single `<li>` as one Markdown list item.
+/// Naver wraps each item's text in a `<p>` (which emits a trailing hard break)
+/// followed by a whitespace text node, so the raw output carries extra newlines
+/// that would split the list into loose paragraphs. Trim them and drop blank
+/// lines so items stay on consecutive lines.
+fn push_list_item(item: ElementRef, out: &mut String, marker: &str) {
+    let mut buf = String::new();
+    push_inline_text(item, &mut buf);
+    let continuation = " ".repeat(marker.chars().count());
+    let mut lines = buf
+        .lines()
+        .map(|l| l.trim_end())
+        .filter(|l| !l.trim().is_empty());
+    out.push_str(marker);
+    if let Some(first) = lines.next() {
+        out.push_str(first.trim_start());
+    }
+    for line in lines {
+        out.push_str("  \n");
+        out.push_str(&continuation);
+        out.push_str(line.trim_start());
+    }
+    out.push('\n');
 }
 
 /// Collects plain text from an element, stripping all formatting markers.
@@ -545,6 +570,15 @@ mod tests {
         let md = convert_html_to_markdown(html);
         assert!(!md.contains("Title"));
         assert!(!md.contains("Desc"));
+    }
+
+    #[test]
+    fn test_list_items_without_extra_blank_lines() {
+        let html = "<div class=\"se-main-container\"><ol class=\"se-text-list\"><li class=\"se-text-list-item\"><p class=\"se-text-paragraph\"><span>first</span></p>\n</li><li class=\"se-text-list-item\"><p class=\"se-text-paragraph\"><span>second</span></p>\n</li></ol><ul class=\"se-text-list\"><li><p class=\"se-text-paragraph\">a</p>\n</li><li><p class=\"se-text-paragraph\">b</p>\n</li></ul></div>";
+        let md = convert_html_to_markdown(html);
+        assert!(md.contains("1. first\n2. second\n"), "{md:?}");
+        assert!(md.contains("- a\n- b"), "{md:?}");
+        assert!(!md.contains("<br>"), "{md:?}");
     }
 
     #[test]
