@@ -8,10 +8,13 @@
 
 ```
 네이버 블로그 → (fetch) → PostgreSQL DB → (publish) → GitHub 블로그 저장소
+                              ↑
+                        웹 대시보드 (serve)
 ```
 
 1. **fetch**: 네이버 블로그 API를 통해 신규 게시물 목록과 본문 HTML을 수집해 DB에 저장
 2. **publish**: DB에 저장된 게시물을 Markdown으로 변환하고 GitHub 저장소에 커밋 & 푸시
+3. **serve**: 위 과정을 주기 실행하면서, 브라우저에서 카테고리 설정·수동 동기화·재발행을 할 수 있는 관리 UI 제공
 
 ---
 
@@ -61,6 +64,14 @@ GITHUB_TOKEN=ghp_your_personal_access_token
 
 # 네이버 크롤링 딜레이 (밀리초, 기본값: 1000)
 CRAWL_DELAY_MS=1500
+
+# ── 관리자 대시보드 (serve) ──
+# 리스닝 포트 (기본값: 8080)
+WEB_PORT=8080
+
+# HTTP Basic 인증. 둘 다 설정해야 인증이 켜집니다.
+WEB_USERNAME=admin
+WEB_PASSWORD=change_me
 ```
 
 ---
@@ -106,6 +117,8 @@ blog-mirror publish
 
 `fetch` → `publish` 순서로 지정된 주기마다 반복 실행합니다. `Ctrl+C`로 종료합니다.
 
+> 관리 UI까지 함께 쓰려면 아래 [`serve`](#serve--관리자-웹-대시보드)를 쓰세요. `serve`가 이 동작을 포함합니다.
+
 ```bash
 # 기본값: 3600초(1시간) 주기
 blog-mirror sync-loop
@@ -113,6 +126,66 @@ blog-mirror sync-loop
 # 커스텀 주기 (초 단위)
 blog-mirror sync-loop --interval 1800
 ```
+
+---
+
+### `serve` — 관리자 웹 대시보드
+
+브라우저에서 카테고리를 관리하고, 동기화를 수동으로 돌리고, 수정된 글을 다시 발행할 수 있는 웹 UI를 띄웁니다.
+
+```bash
+# 대시보드 + 1시간 주기 자동 동기화 (권장)
+blog-mirror serve
+
+# 포트 변경
+blog-mirror serve --port 9000
+
+# 자동 동기화 없이 대시보드만
+blog-mirror serve --interval 0
+```
+
+기본 포트는 `8080`(환경변수 `WEB_PORT`)입니다.
+
+`serve`는 `sync-loop`의 상위호환입니다. 주기 실행과 대시보드의 수동 실행이 **같은 작업 큐**를 쓰기 때문에
+두 작업이 동시에 git 저장소를 건드리는 일이 없습니다. 따라서 `sync-loop`와 `serve`를 같이 띄우지 말고
+`serve` 하나만 띄우면 됩니다.
+
+#### 기능
+
+| 탭 | 하는 일 |
+|---|---|
+| 대시보드 | 수집/복제 현황 통계, 수동 동기화 버튼, 실행 중인 작업의 실시간 로그 |
+| 카테고리 | 복제 대상(`should_mirror`) 토글, 태그에 쓸 표시 이름(`display_name`) 편집, 일괄 설정 |
+| 게시글 | 제목·logNo 검색, 카테고리/상태 필터, 변환된 마크다운 미리보기, 재동기화 |
+| 작업 로그 | 과거 실행 이력과 각 실행의 전체 로그 |
+
+#### 변경된 글 재동기화
+
+네이버에서 글을 수정했다면 **게시글** 탭에서 해당 글을 골라 다시 발행할 수 있습니다.
+
+- **네이버에서 다시 받아 재발행** — 본문 HTML을 네이버에서 새로 받아온 뒤 `.md`를 다시 쓰고 push 합니다.
+- **저장된 본문으로 재발행** — 네이버를 다시 긁지 않고, DB에 있는 본문으로 `.md`만 다시 씁니다.
+  (변환 로직을 고친 뒤 기존 글에 반영할 때 유용합니다.)
+
+**카테고리** 탭에서 카테고리를 골라 그 안의 글을 통째로 재발행할 수도 있습니다.
+
+> 복제 대상이 아닌(`should_mirror = false`) 카테고리의 글은 재동기화를 걸어도 발행되지 않습니다.
+> 작업 결과 메시지에 몇 건이 그렇게 건너뛰어졌는지 표시됩니다.
+
+#### 인증
+
+`WEB_USERNAME`과 `WEB_PASSWORD`를 **둘 다** 설정하면 HTTP Basic 인증이 켜집니다.
+**둘 다 비어 있을 때만** 인증 없이 열리고, 하나만 설정하면 기동 시 에러로 거부합니다.
+(기존 배포에 한쪽만 추가해서 관리 API가 무인증으로 노출되는 사고를 막기 위함입니다.)
+`/healthz`는 k8s 프로브를 위해 항상 인증 없이 열려 있습니다.
+
+```env
+WEB_USERNAME=your_dashboard_username
+WEB_PASSWORD=your_dashboard_password
+```
+
+> 대시보드는 크롤링과 git push를 트리거할 수 있습니다. Gateway/Ingress에서 TLS를 종단하거나
+> 신뢰할 수 있는 네트워크 안에 두는 걸 권장합니다. Basic 인증 자격증명은 평문 HTTP에서 그대로 노출됩니다.
 
 ---
 
@@ -142,7 +215,12 @@ createdb blog_mirror
 
 ```bash
 blog-mirror sync-categories
+```
 
+가장 쉬운 방법은 대시보드(`blog-mirror serve`)의 **카테고리** 탭에서 토글을 켜는 것입니다.
+psql로 직접 하려면:
+
+```bash
 psql $DATABASE_URL -c "SELECT category_no, name FROM categories ORDER BY category_no;"
 
 # 원하는 카테고리 활성화
@@ -155,10 +233,10 @@ psql $DATABASE_URL -c "UPDATE categories SET should_mirror = true WHERE category
 blog-mirror init
 ```
 
-### 4. 자동 동기화 시작
+### 4. 자동 동기화 + 대시보드 시작
 
 ```bash
-blog-mirror sync-loop
+blog-mirror serve
 ```
 
 ---
@@ -166,12 +244,13 @@ blog-mirror sync-loop
 ## 카테고리 표시 이름 커스터마이징
 
 블로그 게시물 태그에 네이버 카테고리 원본 이름 대신 다른 이름을 사용하고 싶을 때는 `display_name`을 설정합니다.
+대시보드 **카테고리** 탭의 '표시 이름' 칸에 입력하면 되고, SQL로는 다음과 같습니다.
 
 ```sql
 UPDATE categories SET display_name = '원하는이름' WHERE category_no = 42;
 ```
 
-`display_name`이 NULL이면 원본 `name`을 그대로 사용합니다.
+`display_name`이 NULL이거나 비어 있으면 원본 `name`을 그대로 사용합니다.
 
 ---
 
@@ -181,11 +260,11 @@ UPDATE categories SET display_name = '원하는이름' WHERE category_no = 42;
 # 이미지 빌드
 docker build -t blog-mirror .
 
-# 실행 (sync-loop 모드, 기본 1시간 주기)
-docker run --env-file .env -v /path/to/blog-clone:/blog blog-mirror
+# 실행 (기본: serve — 대시보드 + 1시간 주기 동기화)
+docker run --env-file .env -p 8080:8080 -v /path/to/blog-clone:/blog blog-mirror
 
 # 커스텀 주기
-docker run --env-file .env -v /path/to/blog-clone:/blog blog-mirror sync-loop --interval 1800
+docker run --env-file .env -p 8080:8080 -v /path/to/blog-clone:/blog blog-mirror serve --interval 1800
 
 # 초기화
 docker run --env-file .env -v /path/to/blog-clone:/blog blog-mirror init

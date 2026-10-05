@@ -29,6 +29,9 @@ target
 
 
 *.html
+# ...except the admin dashboard's page, which is embedded into the binary
+# with include_str! and must be in the repo for the build to work.
+!src/web/assets/*.html
 
 *.yaml
 !k8s/

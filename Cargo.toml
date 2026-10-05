@@ -1,6 +1,6 @@
 [package]
 name = "blog-mirror"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -46,3 +46,8 @@ anyhow = "1"
 
 # URL manipulation
 url = "2"
+
+# Web server (admin dashboard)
+axum = "0.8"
+tower-http = { version = "0.6", features = ["trace"] }
+base64 = "0.22"

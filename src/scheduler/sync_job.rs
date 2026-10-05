@@ -13,35 +13,44 @@ use crate::{
     error::Result,
 };
 
+/// Outcome of a page-walk over the Naver post list.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SyncReport {
+    /// Highest log_no seen during this run, if any
+    pub max_log_no: Option<i64>,
+    /// Number of post rows upserted
+    pub new_posts: usize,
+}
+
 /// Periodic sync job:
 /// 1. Read current cursor
 /// 2. Fetch new posts page-by-page since cursor, upsert each page immediately
 /// 3. Update cursor after all pages are processed
-pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
+pub async fn run(ctx: Arc<AppContext>) -> Result<SyncReport> {
     info!("sync_job: starting");
 
     let cursor_repo = CursorRepo::new(ctx.pool.clone());
     let cursor = cursor_repo.get_cursor(&ctx.config.naver_blog_id).await?;
     info!(cursor, "sync_job: current cursor");
 
-    let max_log_no = sync_pages(ctx.clone(), cursor).await?;
+    let report = sync_pages(ctx.clone(), cursor).await?;
 
-    if let Some(max) = max_log_no {
+    if let Some(max) = report.max_log_no {
         cursor_repo.update_cursor(&ctx.config.naver_blog_id, max).await?;
         info!(max_log_no = max, "sync_job: cursor updated");
     } else {
         info!("sync_job: no new posts");
     }
 
-    info!("sync_job: complete");
-    Ok(())
+    info!(new_posts = report.new_posts, "sync_job: complete");
+    Ok(report)
 }
 
 /// Paginates Naver post list from page 1, stopping when log_no <= cursor.
 /// Upserts each page into DB immediately and saves the cursor after each page,
 /// so the process can be resumed if interrupted.
-/// Returns the highest log_no seen, or None if nothing was fetched.
-pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>> {
+/// Returns the highest log_no seen and how many posts were upserted.
+pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<SyncReport> {
     let crawler = NaverCrawler::new(ctx.config.clone(), ctx.http.clone());
     let category_repo = CategoryRepo::new(ctx.pool.clone());
     let post_repo = PostRepo::new(ctx.pool.clone());
@@ -167,5 +176,8 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<Option<i64>
         crawler.rate_limit().await;
     }
 
-    Ok(max_log_no)
+    Ok(SyncReport {
+        max_log_no,
+        new_posts: total,
+    })
 }

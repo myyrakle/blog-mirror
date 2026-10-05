@@ -17,8 +17,28 @@ use crate::{
 /// 3. Find unreplicated posts in those categories
 /// 4. For each post: fetch HTML → convert → write .md → download images
 /// 5. Commit and push all at once
-pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
-    info!("replicate_job: starting");
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReplicateReport {
+    pub replicated: usize,
+    pub failed: usize,
+    pub pushed: bool,
+}
+
+/// Replicates every unreplicated post in the mirror categories.
+pub async fn run(ctx: Arc<AppContext>) -> Result<ReplicateReport> {
+    run_inner(ctx, None).await
+}
+
+/// Replicates only the given posts (still limited to mirror categories).
+///
+/// Used by manual re-sync so that re-publishing one post doesn't drag along
+/// every other post that happens to be pending.
+pub async fn run_for(ctx: Arc<AppContext>, log_nos: &[i64]) -> Result<ReplicateReport> {
+    run_inner(ctx, Some(log_nos)).await
+}
+
+async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<ReplicateReport> {
+    info!(scoped = only.is_some(), "replicate_job: starting");
 
     let git_repo = GitRepo::open_or_clone(ctx.config.clone())?;
     if let Err(e) = git_repo.pull() {
@@ -35,19 +55,23 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         .find_mirror_categories(&ctx.config.naver_blog_id)
         .await?;
     if mirror_cats.is_empty() {
-        info!("replicate_job: no categories with should_mirror=true in DB, skipping");
-        return Ok(());
+        warn!("replicate_job: no categories with should_mirror=true in DB, skipping");
+        return Ok(ReplicateReport::default());
     }
     let mirror_category_nos: Vec<i32> = mirror_cats.iter().map(|c| c.category_no).collect();
     info!(categories = ?mirror_category_nos, "replicate_job: mirror categories");
 
-    let posts = post_repo
+    let mut posts = post_repo
         .find_unreplicated_in_categories(&ctx.config.naver_blog_id, &mirror_category_nos)
         .await?;
 
+    if let Some(only) = only {
+        posts.retain(|p| only.contains(&p.log_no));
+    }
+
     if posts.is_empty() {
         info!("replicate_job: no posts to replicate");
-        return Ok(());
+        return Ok(ReplicateReport::default());
     }
     info!(count = posts.len(), "replicate_job: posts to replicate");
 
@@ -58,6 +82,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         .collect();
 
     let mut replicated_count = 0usize;
+    let mut failed_count = 0usize;
 
     for post in &posts {
         info!(log_no = post.log_no, title = %post.title, "Replicating post");
@@ -77,6 +102,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                             &e.to_string(),
                         )
                         .await?;
+                    failed_count += 1;
                     continue;
                 }
             }
@@ -110,6 +136,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
             post_repo
                 .mark_replication_error(&ctx.config.naver_blog_id, post.log_no, &e.to_string())
                 .await?;
+            failed_count += 1;
             continue;
         }
 
@@ -121,20 +148,26 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         crawler.rate_limit().await;
     }
 
+    let mut pushed = false;
     if replicated_count > 0 {
         info!(replicated_count, "Committing and pushing to GitHub");
         git_repo.add_all()?;
 
         if git_repo.has_staged_changes()? {
-            let msg = format!("mirror: add {} post(s) from Naver blog", replicated_count);
+            let msg = format!("mirror: sync {} post(s) from Naver blog", replicated_count);
             git_repo.commit(&msg)?;
             git_repo.push()?;
+            pushed = true;
             info!("replicate_job: push complete");
         } else {
             info!("replicate_job: no changes to push");
         }
     }
 
-    info!(replicated_count, "replicate_job: complete");
-    Ok(())
+    info!(replicated_count, failed_count, "replicate_job: complete");
+    Ok(ReplicateReport {
+        replicated: replicated_count,
+        failed: failed_count,
+        pushed,
+    })
 }

@@ -1,5 +1,6 @@
 pub mod category_repo;
 pub mod cursor_repo;
+pub mod job_repo;
 pub mod post_repo;
 
 use sqlx::PgPool;

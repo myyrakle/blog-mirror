@@ -19,13 +19,19 @@ pub async fn run(ctx: Arc<AppContext>, interval_secs: u64) -> Result<()> {
 
     loop {
         info!("sync-loop: running fetch");
-        if let Err(e) = sync_job::run(ctx.clone()).await {
-            tracing::error!(error = %e, "sync-loop: fetch failed");
+        match sync_job::run(ctx.clone()).await {
+            Ok(report) => info!(new_posts = report.new_posts, "sync-loop: fetch done"),
+            Err(e) => tracing::error!(error = %e, "sync-loop: fetch failed"),
         }
 
         info!("sync-loop: running publish");
-        if let Err(e) = replicate_job::run(ctx.clone()).await {
-            tracing::error!(error = %e, "sync-loop: publish failed");
+        match replicate_job::run(ctx.clone()).await {
+            Ok(report) => info!(
+                replicated = report.replicated,
+                failed = report.failed,
+                "sync-loop: publish done"
+            ),
+            Err(e) => tracing::error!(error = %e, "sync-loop: publish failed"),
         }
 
         info!(interval_secs, "sync-loop: sleeping");
