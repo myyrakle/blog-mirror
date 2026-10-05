@@ -177,8 +177,9 @@ impl PostRepo {
         let where_sql = r#"
             WHERE p.blog_id = $1
               AND ($2::int  IS NULL OR p.category_no = $2::int)
-              AND ($3::text IS NULL OR p.title ILIKE '%' || $3::text || '%'
-                                    OR CAST(p.log_no AS TEXT) LIKE '%' || $3::text || '%')
+              AND ($3::text IS NULL
+                   OR p.title ILIKE '%' || $3::text || '%' ESCAPE '\'
+                   OR CAST(p.log_no AS TEXT) LIKE '%' || $3::text || '%' ESCAPE '\')
               AND ($4::text = 'all'
                    OR ($4::text = 'pending'    AND p.replicated_at IS NULL)
                    OR ($4::text = 'replicated' AND p.replicated_at IS NOT NULL)
@@ -312,6 +313,20 @@ pub struct PostListRow {
     pub replication_error: Option<String>,
     pub has_body: bool,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Escapes `\`, `%` and `_` so a search term is matched literally by LIKE.
+/// Without this, typing `_` or `%` into the dashboard search box silently
+/// behaves as a wildcard.
+pub fn escape_like(term: &str) -> String {
+    let mut out = String::with_capacity(term.len());
+    for ch in term.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Filter + pagination parameters for [`PostRepo::list`].

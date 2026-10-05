@@ -175,12 +175,17 @@ blog-mirror serve --interval 0
 #### 인증
 
 `WEB_USERNAME`과 `WEB_PASSWORD`를 **둘 다** 설정하면 HTTP Basic 인증이 켜집니다.
-하나라도 비어 있으면 대시보드는 인증 없이 열립니다. (`/healthz`는 항상 인증 없이 열려 있습니다.)
+**둘 다 비어 있을 때만** 인증 없이 열리고, 하나만 설정하면 기동 시 에러로 거부합니다.
+(기존 배포에 한쪽만 추가해서 관리 API가 무인증으로 노출되는 사고를 막기 위함입니다.)
+`/healthz`는 k8s 프로브를 위해 항상 인증 없이 열려 있습니다.
 
 ```env
-WEB_USERNAME=admin
-WEB_PASSWORD=change_me
+WEB_USERNAME=your_dashboard_username
+WEB_PASSWORD=your_dashboard_password
 ```
+
+> 대시보드는 크롤링과 git push를 트리거할 수 있습니다. Gateway/Ingress에서 TLS를 종단하거나
+> 신뢰할 수 있는 네트워크 안에 두는 걸 권장합니다. Basic 인증 자격증명은 평문 HTTP에서 그대로 노출됩니다.
 
 ---
 

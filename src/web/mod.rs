@@ -45,16 +45,10 @@ pub async fn serve(ctx: Arc<AppContext>, port: u16, interval_secs: u64) -> Resul
         .mark_orphans_interrupted(&ctx.config.naver_blog_id)
         .await?;
 
-    let auth = match (
-        ctx.config.web_username.clone(),
-        ctx.config.web_password.clone(),
-    ) {
-        (Some(u), Some(p)) if !u.is_empty() && !p.is_empty() => Some((u, p)),
-        _ => {
-            warn!("WEB_USERNAME/WEB_PASSWORD not set — the dashboard is unauthenticated");
-            None
-        }
-    };
+    let auth = ctx.config.web_credentials()?;
+    if auth.is_none() {
+        warn!("WEB_USERNAME/WEB_PASSWORD not set — the dashboard is unauthenticated");
+    }
 
     let jobs = JobManager::new(ctx.clone());
     if interval_secs > 0 {
@@ -125,6 +119,7 @@ fn router(state: Arc<WebState>) -> Router {
         .route("/app.js", get(app_js))
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api", api)
+        .layer(middleware::from_fn(require_json_for_writes))
         .layer(middleware::from_fn_with_state(state.clone(), basic_auth))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -148,6 +143,41 @@ fn static_asset(content_type: &'static str, body: &'static str) -> Response {
         body,
     )
         .into_response()
+}
+
+/// Rejects state-changing requests that a plain HTML form could have sent.
+///
+/// `POST /api/jobs/{kind}` takes no body, so without this an attacker's page
+/// could start a crawl or a publish through a cross-origin form submit, riding
+/// on the browser's cached Basic credentials. Forms can only send
+/// `application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`,
+/// so requiring JSON is enough to block them while leaving `fetch` working.
+async fn require_json_for_writes(req: Request, next: Next) -> Response {
+    let is_write = !matches!(req.method(), &axum::http::Method::GET | &axum::http::Method::HEAD);
+
+    if is_write {
+        let content_type = req
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        if !content_type
+            .split(';')
+            .next()
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("application/json"))
+        {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                axum::Json(serde_json::json!({
+                    "error": "Content-Type: application/json 이 필요합니다"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    next.run(req).await
 }
 
 /// HTTP Basic auth, skipped entirely when no credentials are configured.

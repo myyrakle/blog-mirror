@@ -132,7 +132,7 @@ async function pollJob() {
     return; // transient; the interval will retry
   }
 
-  const job = status.job;
+  let job = status.job;
   const indicator = $("job-indicator");
   const badge = $("current-job-badge");
 
@@ -142,10 +142,18 @@ async function pollJob() {
     return;
   }
 
-  // A different job started (e.g. from another browser tab): restart the log.
+  // A different job started (e.g. from another browser tab): restart the log
+  // and re-read from the top, using the refreshed snapshot rather than the
+  // stale one we already have.
   if (lastJobId !== null && job.id !== lastJobId) {
     resetLog(job.id);
-    status = await api(`/jobs/status?from=0`);
+    try {
+      status = await api(`/jobs/status?from=0`);
+    } catch {
+      return;
+    }
+    job = status.job;
+    if (!job) return;
   }
   lastJobId = job.id;
 

@@ -100,7 +100,9 @@ pub async fn run(ctx: Arc<AppContext>, request: ResyncRequest) -> Result<ResyncR
     report.queued = post_repo.reset_replication(&blog_id, &log_nos).await? as usize;
     info!(queued = report.queued, "resync_job: replication markers cleared");
 
-    report.replicate = replicate_job::run(ctx).await?;
+    // Scoped to the requested posts: a re-sync shouldn't also publish every
+    // other post that happens to be sitting unreplicated.
+    report.replicate = replicate_job::run_for(ctx, &log_nos).await?;
 
     info!(
         refetched = report.refetched,

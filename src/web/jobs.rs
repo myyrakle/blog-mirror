@@ -300,16 +300,27 @@ impl JobManager {
             };
 
             tracing::info!(job = kind.as_str(), "job: started");
-            let outcome = task(ctx).await;
 
-            let (status, message) = match &outcome {
+            // Run the job on its own task. A panic then surfaces as a JoinError
+            // rather than unwinding through this one — otherwise the cleanup
+            // below would be skipped, the job would stay `Running` forever and
+            // every later job (including the scheduled sync) would be blocked.
+            let outcome = match tokio::spawn(task(ctx)).await {
+                Ok(result) => result.map_err(|e| e.to_string()),
+                Err(join_err) if join_err.is_panic() => {
+                    Err("작업이 panic으로 중단되었습니다 (자세한 내용은 서버 로그 참조)".to_string())
+                }
+                Err(join_err) => Err(format!("작업이 비정상 종료되었습니다: {join_err}")),
+            };
+
+            let (status, message) = match outcome {
                 Ok(msg) => {
                     tracing::info!(job = kind.as_str(), summary = %msg, "job: finished");
-                    (JobStatus::Success, msg.clone())
+                    (JobStatus::Success, msg)
                 }
-                Err(e) => {
-                    tracing::error!(job = kind.as_str(), error = %e, "job: failed");
-                    (JobStatus::Failed, e.to_string())
+                Err(msg) => {
+                    tracing::error!(job = kind.as_str(), error = %msg, "job: failed");
+                    (JobStatus::Failed, msg)
                 }
             };
 

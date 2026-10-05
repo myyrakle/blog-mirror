@@ -24,8 +24,21 @@ pub struct ReplicateReport {
     pub pushed: bool,
 }
 
+/// Replicates every unreplicated post in the mirror categories.
 pub async fn run(ctx: Arc<AppContext>) -> Result<ReplicateReport> {
-    info!("replicate_job: starting");
+    run_inner(ctx, None).await
+}
+
+/// Replicates only the given posts (still limited to mirror categories).
+///
+/// Used by manual re-sync so that re-publishing one post doesn't drag along
+/// every other post that happens to be pending.
+pub async fn run_for(ctx: Arc<AppContext>, log_nos: &[i64]) -> Result<ReplicateReport> {
+    run_inner(ctx, Some(log_nos)).await
+}
+
+async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<ReplicateReport> {
+    info!(scoped = only.is_some(), "replicate_job: starting");
 
     let git_repo = GitRepo::open_or_clone(ctx.config.clone())?;
     if let Err(e) = git_repo.pull() {
@@ -48,9 +61,13 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<ReplicateReport> {
     let mirror_category_nos: Vec<i32> = mirror_cats.iter().map(|c| c.category_no).collect();
     info!(categories = ?mirror_category_nos, "replicate_job: mirror categories");
 
-    let posts = post_repo
+    let mut posts = post_repo
         .find_unreplicated_in_categories(&ctx.config.naver_blog_id, &mirror_category_nos)
         .await?;
+
+    if let Some(only) = only {
+        posts.retain(|p| only.contains(&p.log_no));
+    }
 
     if posts.is_empty() {
         info!("replicate_job: no posts to replicate");

@@ -17,7 +17,7 @@ use crate::{
         category_repo::{CategoryRepo, CategoryWithStats},
         cursor_repo::CursorRepo,
         job_repo::{JobRepo, JobRunRecord},
-        post_repo::{PostFilter, PostListRow, PostRepo, PostStats},
+        post_repo::{PostFilter, PostListRow, PostRepo, PostStats, escape_like},
     },
     scheduler::{
         replicate_job,
@@ -47,9 +47,15 @@ impl ApiError {
 }
 
 impl From<crate::error::AppError> for ApiError {
+    /// Internal errors are logged in full but reported generically: the text
+    /// can carry connection strings and other internals we don't want on the
+    /// wire. Job failures still show their real cause in the job log.
     fn from(e: crate::error::AppError) -> Self {
         tracing::error!(error = %e, "api: internal error");
-        Self(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        Self(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "서버 내부 오류가 발생했습니다. 자세한 내용은 서버 로그를 확인하세요.".to_string(),
+        )
     }
 }
 
@@ -217,7 +223,8 @@ pub async fn list_posts(
     let query = q
         .q
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .map(|s| escape_like(&s));
 
     let filter = PostFilter {
         query,
