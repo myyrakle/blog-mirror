@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: blog-mirror
-          image: myyrakle/blog-mirror:v0.2.0
+          image: myyrakle/blog-mirror:v0.2.1
           imagePullPolicy: Always
           # `serve` runs the admin dashboard *and* the periodic sync in one
           # process, so a scheduled run and a dashboard-triggered run can never
