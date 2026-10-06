@@ -366,25 +366,34 @@ fn detect_naver_heading(el: ElementRef) -> Option<&'static str> {
 
 /// Renders a single `<li>` as one Markdown list item.
 /// Naver wraps each item's text in a `<p>` (which emits a trailing hard break)
-/// followed by a whitespace text node, so the raw output carries extra newlines
-/// that would split the list into loose paragraphs. Trim them and drop blank
-/// lines so items stay on consecutive lines.
+/// followed by a whitespace text node, so the raw output carries trailing
+/// newlines that would split the list into loose paragraphs. Trim only the
+/// leading/trailing blank lines; blank lines between content (empty `<p>`s
+/// inside the item) are kept, and continuation lines are indented so they stay
+/// inside the item.
 fn push_list_item(item: ElementRef, out: &mut String, marker: &str) {
     let mut buf = String::new();
     push_inline_text(item, &mut buf);
-    let continuation = " ".repeat(marker.chars().count());
-    let mut lines = buf
-        .lines()
-        .map(|l| l.trim_end())
-        .filter(|l| !l.trim().is_empty());
+    let lines: Vec<&str> = buf.lines().collect();
+    let start = lines.iter().position(|l| !l.trim().is_empty());
+    let end = lines.iter().rposition(|l| !l.trim().is_empty());
     out.push_str(marker);
-    if let Some(first) = lines.next() {
-        out.push_str(first.trim_start());
-    }
-    for line in lines {
-        out.push_str("  \n");
-        out.push_str(&continuation);
-        out.push_str(line.trim_start());
+    if let (Some(start), Some(end)) = (start, end) {
+        let continuation = " ".repeat(marker.chars().count());
+        for (i, line) in lines[start..=end].iter().enumerate() {
+            if i == 0 {
+                out.push_str(line.trim_start());
+            } else {
+                out.push('\n');
+                if !line.trim().is_empty() {
+                    out.push_str(&continuation);
+                    out.push_str(line);
+                }
+            }
+        }
+        // Drop the trailing hard break left by the last `<p>`.
+        let trimmed_len = out.trim_end().len();
+        out.truncate(trimmed_len);
     }
     out.push('\n');
 }
@@ -579,6 +588,13 @@ mod tests {
         assert!(md.contains("1. first\n2. second\n"), "{md:?}");
         assert!(md.contains("- a\n- b"), "{md:?}");
         assert!(!md.contains("<br>"), "{md:?}");
+    }
+
+    #[test]
+    fn test_list_item_keeps_inner_blank_paragraph() {
+        let html = "<div class=\"se-main-container\"><ol class=\"se-text-list\"><li><p class=\"se-text-paragraph\">a</p><p class=\"se-text-paragraph\">\u{200B}</p><p class=\"se-text-paragraph\">b</p>\n</li><li><p class=\"se-text-paragraph\">c</p>\n</li></ol></div>";
+        let md = convert_html_to_markdown(html);
+        assert!(md.contains("1. a  \n\n   b\n2. c"), "{md:?}");
     }
 
     #[test]
