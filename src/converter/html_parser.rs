@@ -89,6 +89,23 @@ fn handle_element(el: ElementRef, out: &mut String, list_depth: usize) {
         return;
     }
 
+    // --- Skip Naver's own page chrome ---
+    // Posts written in the legacy SE2/SE3 editor have no `.se-main-container`,
+    // so extraction falls back to `.post_ct` / `._postView`, which wrap the
+    // document header and the post toolbar alongside the actual content. That
+    // leaked the category link, the publish date and buttons like
+    // "공유하기" / "URL복사" / "신고하기" into the published Markdown.
+    const CHROME_CLASSES: [&str; 5] = [
+        "se_documentTitle",  // legacy header: title + category link + date
+        "blog_category",     // "[경지](/PostList.naver?blogId=...)"
+        "blog_date",         // "2017. 12. 2. 15:54"
+        "post_function_t1",  // "본문 기타 기능" toolbar
+        "lyr_post_function", // its popup: font size / 공유하기 / URL복사 / 신고하기
+    ];
+    if CHROME_CLASSES.iter().any(|c| has_class(c)) {
+        return;
+    }
+
     // --- Headings ---
     for (i, prefix) in ["# ", "## ", "### ", "#### ", "##### ", "###### "]
         .iter()
@@ -571,6 +588,39 @@ mod tests {
         assert!(md.contains("```sql"));
         assert!(md.contains("SELECT 1;"));
         assert!(md.contains("```"));
+    }
+
+    #[test]
+    fn test_naver_chrome_skipped() {
+        // Legacy posts fall back to a container that wraps Naver's own header
+        // and toolbar; none of it belongs in the published Markdown.
+        let html = r#"
+            <div class="post_ct se3_view">
+              <div class="se_component se_documentTitle">
+                <div class="blog_category"><a href="/PostList.naver?blogId=x">경지</a></div>
+                <div class="blog_date"><span class="txt">2017. 12. 2. 15:54</span></div>
+              </div>
+              <div class="post_function_t1">
+                <div class="lyr_post_function"><ul>
+                  <li class="font_size"><strong class="blind">본문 폰트 크기 조정</strong></li>
+                  <li><a>공유하기</a></li><li><a>URL복사</a></li><li><a>신고하기</a></li>
+                </ul></div>
+              </div>
+              <p>진짜 본문입니다.</p>
+            </div>"#;
+        let md = convert_html_to_markdown(html);
+        assert!(md.contains("진짜 본문입니다."), "{md:?}");
+        for junk in [
+            "경지",
+            "PostList.naver",
+            "2017. 12. 2. 15:54",
+            "본문 폰트 크기 조정",
+            "공유하기",
+            "URL복사",
+            "신고하기",
+        ] {
+            assert!(!md.contains(junk), "chrome leaked: {junk} in {md:?}");
+        }
     }
 
     #[test]
