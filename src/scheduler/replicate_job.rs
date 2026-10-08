@@ -87,10 +87,13 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
     for post in &posts {
         info!(log_no = post.log_no, title = %post.title, "Replicating post");
 
-        // Use stored body if available, otherwise fetch from Naver
+        // Use stored body if available, otherwise fetch from Naver.
+        // Only a real Naver request needs the crawl delay afterwards.
+        let mut hit_naver = false;
         let html = if let Some(body) = post.body.clone() {
             body
         } else {
+            hit_naver = true;
             match crawler.fetch_post_html(post.log_no).await {
                 Ok(h) => h,
                 Err(e) => {
@@ -103,6 +106,9 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
                         )
                         .await?;
                     failed_count += 1;
+                    // The request still reached Naver, so back off before the
+                    // next one — otherwise a run of failures hammers them.
+                    crawler.rate_limit().await;
                     continue;
                 }
             }
@@ -145,7 +151,13 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
             .await?;
         replicated_count += 1;
 
-        crawler.rate_limit().await;
+        // The delay exists to avoid tripping Naver's rate limiting; when the
+        // body came from the DB no request was made, so there is nothing to
+        // back off from. Re-publishing stored posts used to sleep 1.5s each,
+        // turning a bulk re-sync of a few thousand posts into hours of idling.
+        if hit_naver {
+            crawler.rate_limit().await;
+        }
     }
 
     let mut pushed = false;
