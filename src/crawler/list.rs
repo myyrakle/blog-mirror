@@ -104,18 +104,11 @@ impl PostListItem {
             return Some(now - chrono::Duration::days(n));
         }
 
-        // --- Absolute format: "2024. 01. 15. 10:30" ---
-        // Normalize by replacing ". " with "-" and removing remaining "."
-        let normalized = s.replace(". ", "-").replace('.', "").trim().to_string();
-        for fmt in &["%Y-%m-%d-%H:%M", "%Y- %m- %d- %H:%M"] {
-            if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&normalized, fmt) {
-                return Some(naive.and_utc());
-            }
-        }
-
-        // --- Absolute date only: "2024. 01. 15." ---
-        if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y. %m. %d.") {
-            return Some(date.and_hms_opt(0, 0, 0)?.and_utc());
+        // --- Absolute formats ---
+        // Naver reports these in KST. They used to be read as UTC, which put
+        // every post 9 hours early.
+        if let Some(dt) = crate::crawler::detail::parse_kst_datetime(s) {
+            return Some(dt);
         }
 
         warn!(raw = s, "Could not parse Naver add_date");

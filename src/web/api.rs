@@ -20,7 +20,7 @@ use crate::{
         post_repo::{PostFilter, PostListRow, PostRepo, PostStats, escape_like},
     },
     scheduler::{
-        replicate_job,
+        backfill_dates_job, replicate_job,
         resync_job::{self, ResyncRequest},
         sync_job,
     },
@@ -351,6 +351,13 @@ pub async fn start_job(
                         "신규 {}건 수집 / {}",
                         f.new_posts,
                         summarize_replicate(&r)
+                    ))
+                }
+                JobKind::BackfillDates => {
+                    let r = backfill_dates_job::run(ctx, 500).await?;
+                    Ok(format!(
+                        "{}건 확인 / {}건 작성일 보정 / {}건 날짜 없음 / {}건 실패",
+                        r.examined, r.updated, r.no_date, r.failed
                     ))
                 }
                 JobKind::Resync => unreachable!("filtered above"),

@@ -107,6 +107,7 @@ pub enum JobKind {
     Publish,
     FetchAndPublish,
     Resync,
+    BackfillDates,
 }
 
 impl JobKind {
@@ -117,6 +118,7 @@ impl JobKind {
             JobKind::Publish => "publish",
             JobKind::FetchAndPublish => "fetch-and-publish",
             JobKind::Resync => "resync",
+            JobKind::BackfillDates => "backfill-dates",
         }
     }
 
@@ -127,6 +129,7 @@ impl JobKind {
             JobKind::Publish => "GitHub 복제",
             JobKind::FetchAndPublish => "수집 + 복제",
             JobKind::Resync => "재동기화",
+            JobKind::BackfillDates => "작성일 보정",
         }
     }
 
@@ -137,6 +140,7 @@ impl JobKind {
             "publish" => Some(JobKind::Publish),
             "fetch-and-publish" => Some(JobKind::FetchAndPublish),
             "resync" => Some(JobKind::Resync),
+            "backfill-dates" => Some(JobKind::BackfillDates),
             _ => None,
         }
     }
