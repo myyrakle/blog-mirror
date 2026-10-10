@@ -12,6 +12,9 @@ pub struct MirroredPost {
     pub category_name: Option<String>,
     pub markdown_body: String,
     pub add_date: Option<DateTime<Utc>>,
+    /// When the post row was first created, used as a stable stand-in if the
+    /// post has no publish date of its own.
+    pub created_at: DateTime<Utc>,
     pub category_no: Option<i32>,
 }
 
@@ -28,10 +31,10 @@ pub fn write_post(repo_path: &Path, post: &MirroredPost) -> Result<()> {
 }
 
 fn render_post(post: &MirroredPost) -> String {
-    let date = post
-        .add_date
-        .map(|d| d.to_rfc3339())
-        .unwrap_or_else(|| Utc::now().to_rfc3339());
+    // Fall back to when we first saw the post, never to "now": `now()` makes
+    // the output depend on when it was rendered, so every re-publish rewrote
+    // the file with a new date and reshuffled the blog's ordering.
+    let date = post.add_date.unwrap_or(post.created_at).to_rfc3339();
 
     let tags_line = post
         .category_name
@@ -84,6 +87,9 @@ mod tests {
             category_name: Some("Programming".to_string()),
             markdown_body: "Hello World".to_string(),
             add_date: None,
+            created_at: DateTime::parse_from_rfc3339("2024-05-06T07:08:09Z")
+                .unwrap()
+                .to_utc(),
             category_no: Some(42),
         };
         let rendered = render_post(&post);
@@ -91,5 +97,26 @@ mod tests {
         assert!(rendered.contains("naver_log_no = 12345"));
         assert!(rendered.contains("tags = [\"Programming\"]"));
         assert!(rendered.contains("Hello World"));
+    }
+
+    #[test]
+    fn falls_back_to_created_at_not_now() {
+        let created = DateTime::parse_from_rfc3339("2024-05-06T07:08:09Z")
+            .unwrap()
+            .to_utc();
+        let post = MirroredPost {
+            log_no: 1,
+            title: "No date".to_string(),
+            category_name: None,
+            markdown_body: "body".to_string(),
+            add_date: None,
+            created_at: created,
+            category_no: None,
+        };
+        // Rendering twice must give the same date, which `Utc::now()` could not.
+        let a = render_post(&post);
+        let b = render_post(&post);
+        assert_eq!(a, b);
+        assert!(a.contains("date = 2024-05-06T07:08:09+00:00"), "{a:?}");
     }
 }
