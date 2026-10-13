@@ -90,6 +90,11 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
         // Use stored body if available, otherwise fetch from Naver.
         // Only a real Naver request needs the crawl delay afterwards.
         let mut hit_naver = false;
+
+        // Every exit from this block falls through to the delay below, so a
+        // failure part-way cannot skip the back-off and leave the next post
+        // free to hit Naver immediately.
+        'post: {
         let html = if let Some(body) = post.body.clone() {
             body
         } else {
@@ -106,10 +111,7 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
                         )
                         .await?;
                     failed_count += 1;
-                    // The request still reached Naver, so back off before the
-                    // next one — otherwise a run of failures hammers them.
-                    crawler.rate_limit().await;
-                    continue;
+                    break 'post;
                 }
             }
         };
@@ -143,18 +145,20 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
                 .mark_replication_error(&ctx.config.naver_blog_id, post.log_no, &e.to_string())
                 .await?;
             failed_count += 1;
-            continue;
+            break 'post;
         }
 
         post_repo
             .mark_replicated(&ctx.config.naver_blog_id, post.log_no)
             .await?;
         replicated_count += 1;
+        }
 
         // The delay exists to avoid tripping Naver's rate limiting; when the
         // body came from the DB no request was made, so there is nothing to
         // back off from. Re-publishing stored posts used to sleep 1.5s each,
         // turning a bulk re-sync of a few thousand posts into hours of idling.
+        // A failed fetch still reached Naver, so it backs off too.
         if hit_naver {
             crawler.rate_limit().await;
         }
