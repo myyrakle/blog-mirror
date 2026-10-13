@@ -55,7 +55,10 @@ spec:
       volumes:
         - name: blog-repo
           hostPath:
-            # Replace with the host path where the GitHub Pages repo is cloned.
+            # MUST be replaced with the host path where the GitHub Pages repo
+            # is cloned. Applying this file unedited points a running
+            # deployment at a path that does not exist and the pod stops
+            # starting. See k8s/README.md for the apply procedure.
             path: /path/to/blog-mirror-clone
             type: Directory
       restartPolicy: Always
