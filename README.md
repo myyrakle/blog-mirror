@@ -257,7 +257,14 @@ UPDATE categories SET display_name = '원하는이름' WHERE category_no = 42;
 ## Docker
 
 ```bash
-# 이미지 빌드
+# 릴리스 이미지 빌드 & 푸시 (버전은 Cargo.toml에서 읽음)
+./buildx.sh
+
+# 버전 지정 / 멀티 아키텍처
+./buildx.sh 0.2.2
+PLATFORMS=linux/amd64,linux/arm64 ./buildx.sh
+
+# 로컬 빌드만
 docker build -t blog-mirror .
 
 # 실행 (기본: serve — 대시보드 + 1시간 주기 동기화)
