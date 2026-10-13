@@ -128,6 +128,7 @@ async fn run_inner(ctx: Arc<AppContext>, only: Option<&[i64]>) -> Result<Replica
             category_name,
             markdown_body: markdown,
             add_date: post.add_date,
+            created_at: post.created_at,
             category_no: post.category_no,
         };
 
