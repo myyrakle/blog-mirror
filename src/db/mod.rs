@@ -38,12 +38,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
 /// INSERT is what fails, so it never gets far enough to run one. It has to
 /// happen before the migrator does anything, which is why it lives here.
 async fn repair_migrations_table(pool: &PgPool) -> Result<()> {
+    // `to_regclass` resolves the bare name through search_path exactly as the
+    // migrator's own unqualified statements do. Looking it up by
+    // `current_schema()` instead would check the *first* schema on the path
+    // while sqlx used a table from a later one, so a broken table could be
+    // declared healthy and the migration would still fail.
     let needs_repair: Option<(bool,)> = sqlx::query_as(
-        "SELECT column_default IS NULL
-         FROM information_schema.columns
-         WHERE table_schema = current_schema()
-           AND table_name = '_sqlx_migrations'
-           AND column_name = 'installed_on'",
+        "SELECT NOT a.atthasdef
+         FROM pg_attribute a
+         WHERE a.attrelid = to_regclass('_sqlx_migrations')
+           AND a.attname = 'installed_on'
+           AND NOT a.attisdropped",
     )
     .fetch_optional(pool)
     .await?;
