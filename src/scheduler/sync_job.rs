@@ -150,15 +150,27 @@ pub async fn sync_pages(ctx: Arc<AppContext>, cursor: i64) -> Result<SyncReport>
             // Fetch and store HTML body for each post on this page
             for item in &new_items {
                 crawler.rate_limit().await;
-                match crawler.fetch_post_html(item.log_no).await {
-                    Ok(html) => {
+                match crawler.fetch_post(item.log_no).await {
+                    Ok(fetched) => {
+                        // The detail page is the only source of the time of
+                        // day; the list API's date alone leaves same-day posts
+                        // sorting arbitrarily.
                         if let Err(e) = post_repo
-                            .save_body(&ctx.config.naver_blog_id, item.log_no, &html)
+                            .save_body_and_date(
+                                &ctx.config.naver_blog_id,
+                                item.log_no,
+                                &fetched.html,
+                                fetched.published_at,
+                            )
                             .await
                         {
                             warn!(log_no = item.log_no, error = %e, "Failed to save body");
                         } else {
-                            info!(log_no = item.log_no, "Saved post body");
+                            info!(
+                                log_no = item.log_no,
+                                published_at = ?fetched.published_at,
+                                "Saved post body"
+                            );
                         }
                     }
                     Err(e) => {

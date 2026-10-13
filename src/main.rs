@@ -41,6 +41,12 @@ enum Commands {
         #[arg(long, default_value_t = 3600)]
         interval: u64,
     },
+    /// One-shot: backfill missing publish times from Naver detail pages
+    BackfillDates {
+        /// Maximum number of posts to process in this run
+        #[arg(long, default_value_t = 500)]
+        limit: i64,
+    },
     /// Run the admin web dashboard (optionally with the periodic sync built in)
     Serve {
         /// Port to listen on (defaults to WEB_PORT, or 8080)
@@ -82,6 +88,17 @@ async fn main() -> anyhow::Result<()> {
             commands::sync_categories::run(ctx).await?;
         }
         Commands::SyncLoop { interval } => commands::sync_loop::run(ctx, interval).await?,
+        Commands::BackfillDates { limit } => {
+            db::run_migrations(&ctx.pool).await?;
+            let r = commands::backfill_dates::run(ctx, limit).await?;
+            info!(
+                examined = r.examined,
+                updated = r.updated,
+                no_date = r.no_date,
+                failed = r.failed,
+                "backfill-dates: done"
+            );
+        }
         Commands::Serve { port, interval } => {
             let port = port.unwrap_or(ctx.config.web_port);
             web::serve(ctx, port, interval).await?

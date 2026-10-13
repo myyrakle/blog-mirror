@@ -81,6 +81,68 @@ impl PostRepo {
         Ok(())
     }
 
+    /// Saves the body together with the exact publish time read off the detail
+    /// page. `add_date` is only overwritten when a date was actually found, so
+    /// a parsing failure never clears a good value.
+    pub async fn save_body_and_date(
+        &self,
+        blog_id: &str,
+        log_no: i64,
+        body: &str,
+        published_at: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE posts
+             SET body = $3,
+                 add_date = COALESCE($4::timestamptz, add_date),
+                 fetched_at = NOW(),
+                 updated_at = NOW()
+             WHERE blog_id = $1 AND log_no = $2",
+        )
+        .bind(blog_id)
+        .bind(log_no)
+        .bind(body)
+        .bind(published_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Posts whose stored date carries no time of day (or none at all), which
+    /// is everything collected before the date backfill existed.
+    pub async fn find_needing_date_backfill(&self, blog_id: &str, limit: i64) -> Result<Vec<i64>> {
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT log_no FROM posts
+             WHERE blog_id = $1
+               AND (add_date IS NULL OR (add_date AT TIME ZONE 'Asia/Seoul')::time = '00:00:00')
+             ORDER BY log_no DESC
+             LIMIT $2",
+        )
+        .bind(blog_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(v,)| v).collect())
+    }
+
+    /// Updates only the publish date.
+    pub async fn update_add_date(
+        &self,
+        blog_id: &str,
+        log_no: i64,
+        add_date: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE posts SET add_date = $3, updated_at = NOW() WHERE blog_id = $1 AND log_no = $2",
+        )
+        .bind(blog_id)
+        .bind(log_no)
+        .bind(add_date)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_unreplicated_in_categories(
         &self,
         blog_id: &str,
